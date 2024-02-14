@@ -99,9 +99,9 @@ void platform_init()
     if(!i2c1_pullups)
     {
         gpio_setMode(I2C1_SDA, ALTERNATE_OD);
-        GPIOB->PUPDR |= GPIO_PUPDR_PUPD7_0;
+        GPIOB->PUPDR |= GPIO_PUPDR_PUPDR7_0;
         gpio_setMode(I2C1_SCL, ALTERNATE_OD);
-        GPIOB->PUPDR |= GPIO_PUPDR_PUPD6_0;
+        GPIOB->PUPDR |= GPIO_PUPDR_PUPDR6_0;
     }else{
         gpio_setMode(I2C1_SDA, ALTERNATE_OD);
         gpio_setMode(I2C1_SCL, ALTERNATE_OD);

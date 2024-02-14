@@ -141,17 +141,17 @@ error_t i2c2_write_bytes(uint8_t addr, uint8_t *bytes, uint16_t length, bool sto
     // Send start
     I2C2->CR1 |= I2C_CR1_START;
     // Wait for SB bit to be set
-    while(!(I2C2->SR1 & I2C_SR1_SB_Msk));
+    while(!(I2C2->SR1 & I2C_SR1_SB));
 
     // Send address (w)
     I2C2->DR = addr << 1;
 
     // Wait for ADDR bit to be set then read SR1 and SR2
-    while(!(I2C2->SR1 & I2C_SR1_ADDR_Msk))
+    while(!(I2C2->SR1 & I2C_SR1_ADDR))
     {
         if(i2c2_smb_state.timeout)
             return ETIMEDOUT;
-        else if(I2C2->SR1 & I2C_SR1_AF_Msk)
+        else if(I2C2->SR1 & I2C_SR1_AF)
         {
             I2C2->CR1 |= I2C_CR1_STOP;
             return ENODEV;
@@ -159,7 +159,7 @@ error_t i2c2_write_bytes(uint8_t addr, uint8_t *bytes, uint16_t length, bool sto
     }
 
     // Read SR2 by checking that we are transmitter
-    if(!(I2C2->SR2 & I2C_SR2_TRA_Msk))
+    if(!(I2C2->SR2 & I2C_SR2_TRA))
     {   
         I2C2->CR1 |= I2C_CR1_STOP;
         return EPROTO; // We are not transmitter
@@ -171,7 +171,7 @@ error_t i2c2_write_bytes(uint8_t addr, uint8_t *bytes, uint16_t length, bool sto
         I2C2->DR = bytes[i];    // Send data
 
         // Wait for data to be sent
-        while(!(I2C2->SR1 & I2C_SR1_TXE_Msk))
+        while(!(I2C2->SR1 & I2C_SR1_TXE))
         {
             if(i2c2_smb_state.timeout)
                 return ETIMEDOUT;
@@ -194,7 +194,7 @@ error_t i2c2_read_bytes(uint8_t addr, uint8_t *bytes, uint16_t length, bool stop
     // Send start
     I2C2->CR1 |= I2C_CR1_START;
     // Wait for SB bit to be set
-    while(!(I2C2->SR1 & I2C_SR1_SB_Msk));
+    while(!(I2C2->SR1 & I2C_SR1_SB));
     
     // Send address (R)
     I2C2->DR = (addr << 1) + 1;  
@@ -207,11 +207,11 @@ error_t i2c2_read_bytes(uint8_t addr, uint8_t *bytes, uint16_t length, bool stop
         I2C2->CR1 |= I2C_CR1_ACK; // Ack
 
     // Wait for ADDR bit to be set then read SR1 and SR2
-    while(!(I2C2->SR1 & I2C_SR1_ADDR_Msk))
+    while(!(I2C2->SR1 & I2C_SR1_ADDR))
     {
         if(i2c2_smb_state.timeout)
             return ETIMEDOUT;
-        else if(I2C2->SR1 & I2C_SR1_AF_Msk)
+        else if(I2C2->SR1 & I2C_SR1_AF)
         {
             I2C2->CR1 |= I2C_CR1_STOP;
             return ENODEV;
@@ -220,7 +220,7 @@ error_t i2c2_read_bytes(uint8_t addr, uint8_t *bytes, uint16_t length, bool stop
     }
 
     // Read SR2 by checking that we are receiver
-    if( (length != 0) && (I2C2->SR2 & I2C_SR2_TRA_Msk))
+    if( (length != 0) && (I2C2->SR2 & I2C_SR2_TRA))
     {
         I2C2->CR1 |= I2C_CR1_STOP;
         return EPROTO; // We are not receiver
@@ -233,7 +233,7 @@ error_t i2c2_read_bytes(uint8_t addr, uint8_t *bytes, uint16_t length, bool stop
     for(size_t i = 0; i < length; i++ )
     {   
         // Wait for data to be available
-        while(!(I2C2->SR1 & I2C_SR1_RXNE_Msk))
+        while(!(I2C2->SR1 & I2C_SR1_RXNE))
         {
             if(i2c2_smb_state.timeout)
                 return ETIMEDOUT;
@@ -342,17 +342,17 @@ error_t smb2_block_read(uint8_t addr, uint8_t command, uint8_t *bytes, uint8_t *
     // Send start
     I2C2->CR1 |= I2C_CR1_START | I2C_CR1_ACK;
     // Wait for SB bit to be set
-    while(!(I2C2->SR1 & I2C_SR1_SB_Msk));
+    while(!(I2C2->SR1 & I2C_SR1_SB));
     
     // Send address (R)
     I2C2->DR = (addr << 1) + 1;  
 
     // Wait for ADDR bit to be set then read SR1 and SR2
-    while(!(I2C2->SR1 & I2C_SR1_ADDR_Msk))
+    while(!(I2C2->SR1 & I2C_SR1_ADDR))
     {
         if(i2c2_smb_state.timeout)
             return ETIMEDOUT;
-        else if(I2C2->SR1 & I2C_SR1_AF_Msk)
+        else if(I2C2->SR1 & I2C_SR1_AF)
         {
             I2C2->CR1 |= I2C_CR1_STOP;
             return ENODEV;
@@ -360,7 +360,7 @@ error_t smb2_block_read(uint8_t addr, uint8_t command, uint8_t *bytes, uint8_t *
     }
 
     // Read SR2 by checking that we are receiver
-    if(I2C2->SR2 & I2C_SR2_TRA_Msk)
+    if(I2C2->SR2 & I2C_SR2_TRA)
         return EPROTO; // We are not receiver
 
     *length = I2C2->DR;
@@ -380,7 +380,7 @@ error_t smb2_block_read(uint8_t addr, uint8_t command, uint8_t *bytes, uint8_t *
     for(size_t i = 0; i < *length; i++ )
     {   
         // Wait for data to be available
-        while(!(I2C2->SR1 & I2C_SR1_RXNE_Msk))
+        while(!(I2C2->SR1 & I2C_SR1_RXNE))
         {
             if(i2c2_smb_state.timeout)
             {
@@ -418,17 +418,17 @@ error_t smb2_block_write_block_read_process_call(uint8_t addr, uint8_t command, 
     // Send start
     I2C2->CR1 |= I2C_CR1_START | I2C_CR1_ACK;
     // Wait for SB bit to be set
-    while(!(I2C2->SR1 & I2C_SR1_SB_Msk));
+    while(!(I2C2->SR1 & I2C_SR1_SB));
     
     // Send address (R)
     I2C2->DR = (addr << 1) + 1;  
 
     // Wait for ADDR bit to be set then read SR1 and SR2
-    while(!(I2C2->SR1 & I2C_SR1_ADDR_Msk))
+    while(!(I2C2->SR1 & I2C_SR1_ADDR))
     {
         if(i2c2_smb_state.timeout)
             return ETIMEDOUT;
-        else if(I2C2->SR1 & I2C_SR1_AF_Msk)
+        else if(I2C2->SR1 & I2C_SR1_AF)
         {
             I2C2->CR1 |= I2C_CR1_STOP;
             return ENODEV;
@@ -436,7 +436,7 @@ error_t smb2_block_write_block_read_process_call(uint8_t addr, uint8_t command, 
     }
 
     // Read SR2 by checking that we are receiver
-    if(I2C2->SR2 & I2C_SR2_TRA_Msk)
+    if(I2C2->SR2 & I2C_SR2_TRA)
         return EPROTO; // We are not receiver
         
 
@@ -457,7 +457,7 @@ error_t smb2_block_write_block_read_process_call(uint8_t addr, uint8_t command, 
     for(size_t i = 0; i < *length; i++ )
     {   
         // Wait for data to be available
-        while(!(I2C2->SR1 & I2C_SR1_RXNE_Msk))
+        while(!(I2C2->SR1 & I2C_SR1_RXNE))
         {
             if(i2c2_smb_state.timeout)
             {
@@ -481,14 +481,14 @@ error_t smb2_block_write_block_read_process_call(uint8_t addr, uint8_t command, 
 
 void I2C2_ER_IRQHandler()
 {    
-    if(I2C2->SR1 & I2C_SR1_TIMEOUT_Msk)
+    if(I2C2->SR1 & I2C_SR1_TIMEOUT)
     {
         if(i2c2_smb_state.smb_mode)
             i2c2_smb_state.timeout = true;
         I2C2->SR1 &= ~I2C_SR1_TIMEOUT; // Clear bit
     }
 
-    if(I2C2->SR1 & (I2C_SR1_SMBALERT_Msk | I2C_SR1_PECERR_Msk | I2C_SR1_OVR_Msk | I2C_SR1_AF_Msk | I2C_SR1_ARLO_Msk | I2C_SR1_BERR_Msk))
+    if(I2C2->SR1 & (I2C_SR1_SMBALERT | I2C_SR1_PECERR | I2C_SR1_OVR | I2C_SR1_AF | I2C_SR1_ARLO | I2C_SR1_BERR))
     {
         I2C2->SR1 &= ~(I2C_SR1_PECERR | I2C_SR1_OVR | I2C_SR1_AF | I2C_SR1_ARLO | I2C_SR1_BERR);
     }

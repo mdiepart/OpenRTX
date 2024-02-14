@@ -94,7 +94,7 @@ error_t i2c1_write_bytes(uint8_t addr, uint8_t *bytes, uint8_t length, bool stop
     // Send start
     I2C1->CR1 |= I2C_CR1_START;
     // Wait for SB bit to be set
-    while(!(I2C1->SR1 & I2C_SR1_SB_Msk))
+    while(!(I2C1->SR1 & I2C_SR1_SB))
     {
         if(getTick()-start > timeout_ms)
             return ETIMEDOUT;
@@ -104,10 +104,10 @@ error_t i2c1_write_bytes(uint8_t addr, uint8_t *bytes, uint8_t length, bool stop
     I2C1->DR = addr << 1;
 
     // Wait for ADDR bit to be set then read SR1 and SR2
-    while(!(I2C1->SR1 & I2C_SR1_ADDR_Msk))
+    while(!(I2C1->SR1 & I2C_SR1_ADDR))
     {   
         // Check if the address was NACKed
-        if(I2C1->SR1 & I2C_SR1_AF_Msk)
+        if(I2C1->SR1 & I2C_SR1_AF)
         {
             I2C1->CR1 |= I2C_CR1_STOP;
             return ENODEV;
@@ -117,7 +117,7 @@ error_t i2c1_write_bytes(uint8_t addr, uint8_t *bytes, uint8_t length, bool stop
     }
 
     // Read SR2 by checking that we are transmitter
-    if(!(I2C1->SR2 & I2C_SR2_TRA_Msk))
+    if(!(I2C1->SR2 & I2C_SR2_TRA))
     {
         I2C1->CR1 |= I2C_CR1_STOP;       
         return EPROTO; // We are not transmitter
@@ -129,7 +129,7 @@ error_t i2c1_write_bytes(uint8_t addr, uint8_t *bytes, uint8_t length, bool stop
         I2C1->DR = bytes[i];    // Send data
         
         // Wait for data to be sent
-        while(!(I2C1->SR1 & I2C_SR1_TXE_Msk))
+        while(!(I2C1->SR1 & I2C_SR1_TXE))
         {
             if(getTick()-start > timeout_ms)
                 return ETIMEDOUT;
@@ -150,7 +150,7 @@ error_t i2c1_read_bytes(uint8_t addr, uint8_t *bytes, uint8_t length, bool stop)
     // Send start
     I2C1->CR1 |= I2C_CR1_START;
     // Wait for SB bit to be set
-    while(!(I2C1->SR1 & I2C_SR1_SB_Msk))
+    while(!(I2C1->SR1 & I2C_SR1_SB))
     {
         if(getTick()-start > timeout_ms)
             return ETIMEDOUT;
@@ -165,10 +165,10 @@ error_t i2c1_read_bytes(uint8_t addr, uint8_t *bytes, uint8_t length, bool stop)
         I2C2->CR1 |= I2C_CR1_ACK; // Ack
 
     // Wait for ADDR bit to be set then read SR1 and SR2
-    while(!(I2C1->SR1 & I2C_SR1_ADDR_Msk))
+    while(!(I2C1->SR1 & I2C_SR1_ADDR))
     {
         // Check if the address was NACKed
-        if(I2C1->SR1 & I2C_SR1_AF_Msk)
+        if(I2C1->SR1 & I2C_SR1_AF)
         {
             I2C1->CR1 |= I2C_CR1_STOP;
             return ENODEV;
@@ -178,7 +178,7 @@ error_t i2c1_read_bytes(uint8_t addr, uint8_t *bytes, uint8_t length, bool stop)
     }
 
     // Read SR2 by checking that we are receiver
-    if(I2C1->SR2 & I2C_SR2_TRA_Msk)
+    if(I2C1->SR2 & I2C_SR2_TRA)
     {
         I2C1->CR1 |= I2C_CR1_STOP;
         return EPROTO; // We are not receiver
@@ -187,7 +187,7 @@ error_t i2c1_read_bytes(uint8_t addr, uint8_t *bytes, uint8_t length, bool stop)
     for(size_t i = 0; i < length; i++)
     {   
         // Wait for data to be available
-        while(!(I2C2->SR1 & I2C_SR1_RXNE_Msk))
+        while(!(I2C2->SR1 & I2C_SR1_RXNE))
         {
             if(getTick()-start > timeout_ms)
                 return ETIMEDOUT;
