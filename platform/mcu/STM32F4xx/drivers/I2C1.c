@@ -86,7 +86,7 @@ void i2c1_releaseDevice()
 
 error_t i2c1_write_bytes(uint8_t addr, uint8_t *bytes, uint8_t length, bool stop)
 {
-    uint32_t start = getTick();
+    uint32_t start = getTimeMs();
 
     if(length == 0 || bytes == NULL)
         return EINVAL;
@@ -96,7 +96,7 @@ error_t i2c1_write_bytes(uint8_t addr, uint8_t *bytes, uint8_t length, bool stop
     // Wait for SB bit to be set
     while(!(I2C1->SR1 & I2C_SR1_SB))
     {
-        if(getTick()-start > timeout_ms)
+        if(getTimeMs()-start > timeout_ms)
             return ETIMEDOUT;
     }
 
@@ -112,7 +112,7 @@ error_t i2c1_write_bytes(uint8_t addr, uint8_t *bytes, uint8_t length, bool stop
             I2C1->CR1 |= I2C_CR1_STOP;
             return ENODEV;
         }
-        if(getTick()-start > timeout_ms)
+        if(getTimeMs()-start > timeout_ms)
             return ETIMEDOUT;
     }
 
@@ -131,7 +131,7 @@ error_t i2c1_write_bytes(uint8_t addr, uint8_t *bytes, uint8_t length, bool stop
         // Wait for data to be sent
         while(!(I2C1->SR1 & I2C_SR1_TXE))
         {
-            if(getTick()-start > timeout_ms)
+            if(getTimeMs()-start > timeout_ms)
                 return ETIMEDOUT;
         }
     }
@@ -146,13 +146,13 @@ error_t i2c1_write_bytes(uint8_t addr, uint8_t *bytes, uint8_t length, bool stop
 
 error_t i2c1_read_bytes(uint8_t addr, uint8_t *bytes, uint8_t length, bool stop)
 {
-    uint32_t start = getTick();
+    uint32_t start = getTimeMs();
     // Send start
     I2C1->CR1 |= I2C_CR1_START;
     // Wait for SB bit to be set
     while(!(I2C1->SR1 & I2C_SR1_SB))
     {
-        if(getTick()-start > timeout_ms)
+        if(getTimeMs()-start > timeout_ms)
             return ETIMEDOUT;
     }
     
@@ -173,7 +173,7 @@ error_t i2c1_read_bytes(uint8_t addr, uint8_t *bytes, uint8_t length, bool stop)
             I2C1->CR1 |= I2C_CR1_STOP;
             return ENODEV;
         }
-        if(getTick()-start > timeout_ms)
+        if(getTimeMs()-start > timeout_ms)
             return ETIMEDOUT;
     }
 
@@ -189,7 +189,7 @@ error_t i2c1_read_bytes(uint8_t addr, uint8_t *bytes, uint8_t length, bool stop)
         // Wait for data to be available
         while(!(I2C2->SR1 & I2C_SR1_RXNE))
         {
-            if(getTick()-start > timeout_ms)
+            if(getTimeMs()-start > timeout_ms)
                 return ETIMEDOUT;
         }
         if(i+2 >= length)
