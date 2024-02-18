@@ -24,24 +24,24 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <errno.h>
-//#include <pthread.h>
+#include <pthread.h>
 #include <interfaces/delays.h>
-//#include <time.h>
+#include <time.h>
 #include <hwconfig.h>
 
 #if (CONFIG_USER_FUNCTIONS < 1) || (CONFIG_USER_FUNCTIONS > 32)
 #error "CONFIG_USER_FUNCTIONS must be between 0 and 32"
 #endif
 
-//static pthread_cond_t uf_cond = PTHREAD_COND_INITIALIZER;
-//static pthread_mutex_t uf_mut = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t uf_cond = PTHREAD_COND_INITIALIZER;
+static pthread_mutex_t uf_mut = PTHREAD_MUTEX_INITIALIZER;
 
 static volatile uint32_t unlocked_async_tasks = 0;   // Tasks that must be executed after a trigger
-//static uint32_t expired_tasks = 0;          // Tasks that must be executed periodically
+static uint32_t expired_tasks = 0;          // Tasks that must be executed periodically
 
 static long long uf_wakeup_time;
 
-//static struct timespec timeout;
+static struct timespec timeout;
 
 typedef struct {
     void                    (*f)(void*);
@@ -55,7 +55,7 @@ static user_functions_param_t user_functions[CONFIG_USER_FUNCTIONS] = {0};
 
 void user_functions_init()
 {
-    uf_wakeup_time = getTick();
+    uf_wakeup_time = getTimeMs();
 }
 
 void user_functions_terminate()
@@ -68,8 +68,8 @@ void user_functions_terminate()
 
 void user_functions_task()
 {
-    /*// Compute timeout
-    uint32_t next_exec = UINT32_MAX;
+    // Compute timeout
+    long long int next_exec = INT64_MAX;
 
     for(size_t i = 0; i < CONFIG_USER_FUNCTIONS; i++)
     {
@@ -88,7 +88,9 @@ void user_functions_task()
     }
     
     clock_gettime(CLOCK_MONOTONIC, &timeout);
-    timeout.tv_nsec += (next_exec - getTick())*1e6; // 10ms
+    long long int timeout_ns = ((long long int)next_exec - getTimeMs())*1000000;
+    if(timeout_ns < 0) timeout_ns = 100000;
+    timeout.tv_nsec += (next_exec - getTimeMs())*1000000; // 10ms
     if(timeout.tv_nsec >= 1e9)
     {
         timeout.tv_nsec -= 1e9;
@@ -96,24 +98,24 @@ void user_functions_task()
     }
 
     pthread_mutex_lock(&uf_mut);
-    error_t ret = 0;*/
 
     /*
      * From posix specs, pthread_cond_timedwait can wakeup spuriously,
      * thus we check if it timed out or if an async task must be executed.
      */
-    /*while( (!unlocked_async_tasks) || (ret != ETIMEDOUT) )
+    while( (unlocked_async_tasks == 0) && (getTimeMs() < next_exec) )
     {
-        ret = pthread_cond_wait(&uf_cond, &uf_mut);//, &timeout);
+        pthread_cond_timedwait(&uf_cond, &uf_mut, &timeout);
     }
-    if(ret == ETIMEDOUT)
+
+    if(getTimeMs() >= next_exec)
     {
         // Service all tasks that timed out
         while(expired_tasks)
         {
             uint8_t id = __builtin_ctz(expired_tasks);
-            user_functions[id].f();
             expired_tasks &= ~(1 << id);
+            user_functions[id].f(user_functions[id].arg);
             switch (user_functions[id].scheduling)
             {
             case USER_FUNCTION_1HZ:
@@ -139,37 +141,11 @@ void user_functions_task()
     while(unlocked_async_tasks)
     {
         uint8_t id = __builtin_ctz(unlocked_async_tasks);
-        user_functions[id].f();
-        unlocked_async_tasks &= ~(1 << id);
-    }
-
-    pthread_mutex_unlock(&uf_mut);*/
-
-    // Fixed 5ms sleep time implementation while we wait for the miosix update
-    // check for any async tasks to run
-    while(unlocked_async_tasks)
-    {
-        uint8_t id = __builtin_ctz(unlocked_async_tasks);
         unlocked_async_tasks &= ~(1 << id);
         user_functions[id].f(user_functions[id].arg);
     }
 
-    // Check for any elapsed periodic tasks
-    long long now = getTick();
-    for(size_t id = 0; id < CONFIG_USER_FUNCTIONS; id++)
-    {
-        if(user_functions[id].enabled && user_functions[id].f && (user_functions[id].scheduling != USER_FUNCTION_ASYNC))
-        {
-            if(user_functions[id].next_exec <= now)
-            {
-                user_functions[id].f(user_functions[id].arg);
-                user_functions[id].next_exec += user_functions[id].scheduling;
-            }
-        }
-    }
-
-    uf_wakeup_time += 5;
-    sleepUntil(uf_wakeup_time);
+    pthread_mutex_unlock(&uf_mut);
 }   
 
 error_t user_functions_add(uint8_t id, void (*f)(), void *arg, user_functions_sched_t scheduling)
@@ -184,7 +160,7 @@ error_t user_functions_add(uint8_t id, void (*f)(), void *arg, user_functions_sc
     user_functions[id].arg          = arg;
     user_functions[id].scheduling   = scheduling;
     user_functions[id].enabled      = false;
-    user_functions[id].next_exec    = 0;
+    user_functions[id].next_exec    = getTimeMs();
     return 0;
 }
 
@@ -204,10 +180,10 @@ error_t user_functions_trigger(uint8_t id)
     if(id >= CONFIG_USER_FUNCTIONS)
         return EINVAL;
 
+    pthread_mutex_lock(&uf_mut);
     unlocked_async_tasks |= (1 << id);
-
-    // Check how to handle trigger being called before the user_tasks_init() fn 
-    //pthread_cond_signal(&uf_cond);
+    pthread_cond_signal(&uf_cond);
+    pthread_mutex_unlock(&uf_mut);
 
     return 0;
 }
