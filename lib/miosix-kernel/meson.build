@@ -42,4 +42,4 @@ miosix_nxpmk22_inc = miosix_inc + ['lib/miosix-kernel/miosix/arch/cortexM4_nxpmk
 miosix_nxpmk22_src = miosix_src + ['lib/miosix-kernel/miosix/arch/cortexM4_nxpmk22/common/interfaces-impl/portability.cpp',
                                'lib/miosix-kernel/miosix/arch/common/core/interrupts_cortexMx.cpp',
                                 'lib/miosix-kernel/miosix/arch/common/core/nxpmk22_os_timer.cpp']
-miosix_nxpmk22_def = miosix_def + {'_ARCH_CORTEXM4_NXPMK22' : ''}
+miosix_nxpmk22_def = miosix_def + {'_ARCH_CORTEXM4_NXPMK22' : '', 'CPU_MK22FN512VLH12' : ''}
