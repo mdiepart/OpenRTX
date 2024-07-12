@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2012 by Terraneo Federico                               *
+ *   Copyright (C) 2012-2024 by Terraneo Federico                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -25,10 +25,10 @@
  *   along with this program; if not, see <http://www.gnu.org/licenses/>   *
  ***************************************************************************/
 
-#ifndef ELF_PROGRAM_H
-#define	ELF_PROGRAM_H
+#pragma once
 
 #include <utility>
+#include <cerrno>
 #include "elf_types.h"
 #include "config/miosix_settings.h"
 
@@ -43,15 +43,56 @@ class ElfProgram
 {
 public:
     /**
-     * Constructor
+     * Default constructor
+     */
+    ElfProgram() : elf(nullptr), size(0), ec(-ENOEXEC), copiedInRam(false) {}
+
+    /**
+     * Constructor from file.
+     * This constructor may allocate memory to store the content of the elf file
+     * if the file is not in a XIP capable filesystem.
+     * In this case the resulting ElfProgram class will retain ownership of the
+     * allocated memory and deallocate it in the destructor.
+     *
+     * The loading operation can fail if the file could not be found, is not a
+     * valid elf file or not enough memory was available to complete the
+     * operation. Use errorCode() to check for errors
+     *
+     * \param name executable file name
+     */
+    ElfProgram(const char *name);
+
+    /**
+     * Constructor from already mapped memory, usually the microcontroller's
+     * FLASH memory, in order to support XIP and avoid copying the elf in RAM.
+     * Note that if the program is in a XIP capable filesystem a better way
+     * is to just call the constructor from file.
+     *
+     * The operation can fail if the memory area is not a valid elf file.
+     * Use errorCode() to check for errors
+     *
      * \param elf pointer to the elf file's content. Ownership of the data
      * remains of the caller, that is, the pointer is not deleted by this
-     * class. This is done to allow passing a pointer directly to a location
-     * in the microcontroller's FLASH memory, in order to avoid copying the
-     * elf in RAM
-     * \param size size of the content of the elf file
+     * class.
+     * \param size size in bytes (despite elf is an unsigned int*) of the
+     * content of the elf file
      */
-    ElfProgram(const unsigned int *elf, unsigned int size);
+    ElfProgram(const unsigned int *elf, unsigned int size)
+        : elf(elf), size(size), ec(-ENOEXEC), copiedInRam(false)
+    {
+        validateHeader();
+    }
+
+    /**
+     * \return 0 if this is a valid elf file, or an error code on failure
+     */
+    int errorCode() const { return ec; }
+
+    /**
+     * \return true if the elf file resided in a non-XIP capable filesystem,
+     * and thus it was required to copy the file content in RAM
+     */
+    bool isCopiedInRam() const { return copiedInRam; }
     
     /**
      * \return the a pointer to the elf header
@@ -96,45 +137,59 @@ public:
     }
     
     /**
-     * \return the size of the elf file, as passed in the class' constructor
+     * \return the size in bytes of the elf file, as passed in the constructor
      */
     unsigned int getElfSize() const
     {
         return size;
     }
     
-private:
-    /**
-     * \param size elf file size
-     * \return false if the file is not valid
-     * \throws runtime_error for selected specific types of errors 
+    /*
+     * ElfProgram class is not copyable, but is move assignable
      */
-    bool validateHeader();
+    ElfProgram(const ElfProgram&) = delete;
+    ElfProgram& operator= (const ElfProgram&) = delete;
+    ElfProgram& operator= (ElfProgram&& rhs);
+
+    /**
+     * Destructor
+     */
+    ~ElfProgram();
+
+private:
+
+    /**
+     * Validate elf header, setting ec to 0 if all checks pass.
+     * Trying to follow the "full recognition before processing" approach,
+     * (http://www.cs.dartmouth.edu/~sergey/langsec/occupy/FullRecognition.jpg)
+     * all of the elf fields that will later be used are checked in advance.
+     * Unused fields are unchecked, so when using new fields, add new checks.
+     */
+    void validateHeader();
     
     /**
      * \param dynamic pointer to dynamic segment
      * \param size elf file size
      * \param dataSegmentSize size of data segment in memory
      * \return false if the dynamic segment is not valid
-     * \throws runtime_error for selected specific types of errors 
      */
     bool validateDynamicSegment(const Elf32_Phdr *dynamic,
             unsigned int dataSegmentSize);
-    
+
     /**
-     * \param x field to check for word alignment issues
+     * \param x field to check for alignment issues
+     * \param alignment required alignment, must be a power of 2
      * \return true if not aligned correctly
      */
-    static bool isUnaligned4(unsigned int x) { return x & 0b11; }
+    static bool isUnaligned(unsigned int x, unsigned int alignment)
+    {
+        return x & (alignment-1);
+    }
     
-    /**
-     * \param x field to check for doubleword alignment issues
-     * \return true if not aligned correctly
-     */
-    static bool isUnaligned8(unsigned int x) { return x & 0b111; }
-    
-    const unsigned int * const elf; ///<Pointer to the content of the elf file
-    unsigned int size; ///< Size of the elf file
+    const unsigned int *elf; ///<Pointer to the content of the elf file
+    unsigned int size;  ///< Size in bytes of the elf file
+    int ec;             ///< Error code
+    bool copiedInRam;   ///< If true, elf is allocated in RAM and *this owns it
 };
 
 /**
@@ -146,7 +201,12 @@ public:
     /**
      * Constructor, creates an empty process image.
      */
-    ProcessImage() : image(0), size(0) {}
+    ProcessImage() : image(nullptr), size(0) {}
+
+    /**
+     * \return true if this is a valid process image
+     */
+    bool isValid() const { return image!=nullptr; }
     
     /**
      * Starting from the content of the elf program, create an image in RAM of
@@ -161,30 +221,36 @@ public:
     unsigned int *getProcessBasePointer() const { return image; }
     
     /**
-     * \return the size of the process image, or zero if it is not valid 
+     * \return the size in bytes (despite getProcessBasePointer() returns an
+     * unsigned int*) of the process image, or zero if it is not valid
      */
     unsigned int getProcessImageSize() const { return size; }
-    
+
     /**
-     * \return true if this is a valid process image 
+     * \return the size in bytes of the main stack, excluding the watermark area
      */
-    bool isValid() const { return image!=0; }
+    unsigned int getMainStackSize() const { return mainStackSize; }
+
+    /**
+     * \return the size in bytes of the .data and .bss sections
+     */
+    unsigned int getDataBssSize() const { return dataBssSize; }
     
     /**
      * Destructor. Deletes the process image memory.
      */
     ~ProcessImage();
     
+    ProcessImage(const ProcessImage&) = delete;
+    ProcessImage& operator= (const ProcessImage&) = delete;
 private:
-    ProcessImage(const ProcessImage&);
-    ProcessImage& operator= (const ProcessImage&);
     
-    unsigned int *image; //Pointer to the process image in RAM
-    unsigned int size;   //Size of the process image
+    unsigned int *image;        ///< Pointer to the process image in RAM
+    unsigned int size;          ///< Size in bytes of the process image
+    unsigned int mainStackSize; ///< Size of the main stack
+    unsigned int dataBssSize;   ///< Combined size of .data and .bss
 };
 
 } //namespace miosix
 
 #endif //WITH_PROCESSES
-
-#endif //ELF_PROGRAM_H

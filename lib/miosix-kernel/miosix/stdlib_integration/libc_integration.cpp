@@ -33,6 +33,7 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <reent.h>
+#include <spawn.h>
 #include <sys/stat.h>
 #include <sys/fcntl.h>
 #include <sys/times.h>
@@ -44,6 +45,7 @@
 #include "kernel/logging.h"
 //// kernel interface
 #include "kernel/kernel.h"
+#include "kernel/process.h"
 #include "interfaces/bsp.h"
 #include "interfaces/os_timer.h"
 
@@ -115,7 +117,7 @@ extern "C" {
  * library loaded dynamically, unused since Miosix does not support shared libs
  * \return 0 on success
  */
-int __register_exitproc(int type, void (*fn)(void), void *arg, void *d)
+int __register_exitproc(int type, void (*fn)(void*), void *arg, void *d)
 {
     (void)type;
     (void)fn;
@@ -176,21 +178,21 @@ void *_sbrk_r(struct _reent *ptr, ptrdiff_t incr)
     //This is the absolute end of the heap
     extern char _heap_end asm("_heap_end"); //defined in the linker script
     //This holds the current end of the heap (static)
-    static char *curHeapEnd=NULL;
+    static char *curHeapEnd=nullptr;
     //This holds the previous end of the heap
     char *prevHeapEnd;
 
     //Check if it's first time called
-    if(curHeapEnd==NULL) curHeapEnd=&_end;
+    if(curHeapEnd==nullptr) curHeapEnd=&_end;
 
     prevHeapEnd=curHeapEnd;
     if((curHeapEnd+incr)>&_heap_end)
     {
         //bad, heap overflow
         #ifdef __NO_EXCEPTIONS
-        // When exceptions are disabled operator new would return 0, which would
-        // cause undefined behaviour. So when exceptions are disabled, a heap
-        // overflow causes a reboot.
+        // When exceptions are disabled operator new would return nullptr, which
+        // would cause undefined behaviour. So when exceptions are disabled,
+        // a heap overflow causes a reboot.
         errorLog("\n***Heap overflow\n");
         _exit(1);
         #else //__NO_EXCEPTIONS
@@ -333,14 +335,14 @@ int close(int fd)
  * \internal
  * _write_r, write to a file
  */
-int __attribute__((weak)) _write_r(struct _reent *ptr, int fd, const void *buf, size_t cnt)
+ssize_t __attribute__((weak)) _write_r(struct _reent *ptr, int fd, const void *buf, size_t size)
 {    
     #ifdef WITH_FILESYSTEM
 
     #ifndef __NO_EXCEPTIONS
     try {
     #endif //__NO_EXCEPTIONS
-        int result=miosix::getFileDescriptorTable().write(fd,buf,cnt);
+        ssize_t result=miosix::getFileDescriptorTable().write(fd,buf,size);
         if(result>=0) return result;
         ptr->_errno=-result;
         return -1;
@@ -354,7 +356,7 @@ int __attribute__((weak)) _write_r(struct _reent *ptr, int fd, const void *buf, 
     #else //WITH_FILESYSTEM
     if(fd==STDOUT_FILENO || fd==STDERR_FILENO)
     {
-        int result=miosix::DefaultConsole::instance().getTerminal()->write(buf,cnt);
+        ssize_t result=miosix::DefaultConsole::instance().getTerminal()->write(buf,size);
         if(result>=0) return result;
         ptr->_errno=-result;
         return -1;
@@ -365,23 +367,23 @@ int __attribute__((weak)) _write_r(struct _reent *ptr, int fd, const void *buf, 
     #endif //WITH_FILESYSTEM
 }
 
-int write(int fd, const void *buf, size_t cnt)
+ssize_t write(int fd, const void *buf, size_t size)
 {
-    return _write_r(miosix::getReent(),fd,buf,cnt);
+    return _write_r(miosix::getReent(),fd,buf,size);
 }
 
 /**
  * \internal
  * _read_r, read from a file
  */
-int __attribute__((weak)) _read_r(struct _reent *ptr, int fd, void *buf, size_t cnt)
+ssize_t __attribute__((weak)) _read_r(struct _reent *ptr, int fd, void *buf, size_t size)
 {
     #ifdef WITH_FILESYSTEM
 
     #ifndef __NO_EXCEPTIONS
     try {
     #endif //__NO_EXCEPTIONS
-        int result=miosix::getFileDescriptorTable().read(fd,buf,cnt);
+        ssize_t result=miosix::getFileDescriptorTable().read(fd,buf,size);
         if(result>=0) return result;
         ptr->_errno=-result;
         return -1;
@@ -395,7 +397,7 @@ int __attribute__((weak)) _read_r(struct _reent *ptr, int fd, void *buf, size_t 
     #else //WITH_FILESYSTEM
     if(fd==STDIN_FILENO)
     {
-        int result=miosix::DefaultConsole::instance().getTerminal()->read(buf,cnt);
+        ssize_t result=miosix::DefaultConsole::instance().getTerminal()->read(buf,size);
         if(result>=0) return result;
         ptr->_errno=-result;
         return -1;
@@ -406,9 +408,9 @@ int __attribute__((weak)) _read_r(struct _reent *ptr, int fd, void *buf, size_t 
     #endif //WITH_FILESYSTEM
 }
 
-int read(int fd, void *buf, size_t cnt)
+ssize_t read(int fd, void *buf, size_t size)
 {
-    return _read_r(miosix::getReent(),fd,buf,cnt);
+    return _read_r(miosix::getReent(),fd,buf,size);
 }
 
 /**
@@ -530,18 +532,16 @@ int stat(const char *file, struct stat *pstat)
 
 /**
  * \internal
- * isatty, returns 1 if fd is associated with a terminal
+ * _lstat_r, collect data about a file
  */
-int _isatty_r(struct _reent *ptr, int fd)
+int _lstat_r(struct _reent *ptr, const char *file, struct stat *pstat)
 {
-    (void)ptr;
-
     #ifdef WITH_FILESYSTEM
 
     #ifndef __NO_EXCEPTIONS
     try {
     #endif //__NO_EXCEPTIONS
-        int result=miosix::getFileDescriptorTable().isatty(fd);
+        int result=miosix::getFileDescriptorTable().lstat(file,pstat);
         if(result>=0) return result;
         ptr->_errno=-result;
         return -1;
@@ -549,6 +549,43 @@ int _isatty_r(struct _reent *ptr, int fd)
     } catch(exception& e) {
         ptr->_errno=ENOMEM;
         return -1;
+    }
+    #endif //__NO_EXCEPTIONS
+
+    #else //WITH_FILESYSTEM
+    (void)file;
+    (void)pstat;
+
+    ptr->_errno=ENOENT;
+    return -1;
+    #endif //WITH_FILESYSTEM
+}
+
+int lstat(const char *file, struct stat *pstat)
+{
+    return _lstat_r(miosix::getReent(),file,pstat);
+}
+
+/**
+ * \internal
+ * isatty, returns 1 if fd is associated with a terminal
+ */
+int _isatty_r(struct _reent *ptr, int fd)
+{
+    #ifdef WITH_FILESYSTEM
+
+    #ifndef __NO_EXCEPTIONS
+    try {
+    #endif //__NO_EXCEPTIONS
+        int result=miosix::getFileDescriptorTable().isatty(fd);
+        if(result>0) return result;
+        if(result==0) ptr->_errno=ENOTTY;
+        else ptr->_errno=-result;
+        return 0;
+    #ifndef __NO_EXCEPTIONS
+    } catch(exception& e) {
+        ptr->_errno=ENOMEM;
+        return 0;
     }
     #endif //__NO_EXCEPTIONS
     
@@ -560,6 +597,7 @@ int _isatty_r(struct _reent *ptr, int fd)
         case STDERR_FILENO:
             return 1;
         default:
+            ptr->_errno=EBADF;
             return 0;
     }
     #endif //WITH_FILESYSTEM
@@ -679,17 +717,17 @@ char *_getcwd_r(struct _reent *ptr, char *buf, size_t size)
         int result=miosix::getFileDescriptorTable().getcwd(buf,size);
         if(result>=0) return buf;
         ptr->_errno=-result;
-        return NULL;
+        return nullptr;
     #ifndef __NO_EXCEPTIONS
     } catch(exception& e) {
         ptr->_errno=ENOMEM;
-        return NULL;
+        return nullptr;
     }
     #endif //__NO_EXCEPTIONS
     
     #else //WITH_FILESYSTEM
     ptr->_errno=ENOENT;
-    return NULL;
+    return nullptr;
     #endif //WITH_FILESYSTEM
 }
 
@@ -811,9 +849,10 @@ int rmdir(const char *path)
 int _link_r(struct _reent *ptr, const char *f_old, const char *f_new)
 {
     (void)f_old;
+
+    ptr->_errno=EMFILE; //Currently no fs supports hardlinks
     (void)f_new;
 
-    ptr->_errno=ENOENT; //Unimplemented at the moment
     return -1;
 }
 
@@ -859,6 +898,123 @@ int unlink(const char *file)
 
 /**
  * \internal
+ * _symlink_r: create hardlinks
+ */
+int _symlink_r(struct _reent *ptr, const char *target, const char *linkpath)
+{
+    (void)target;
+    (void)linkpath;
+
+    ptr->_errno=ENOENT; //Unimplemented at the moment
+    return -1;
+}
+
+int symlink(const char *target, const char *linkpath)
+{
+    return _symlink_r(miosix::getReent(),target,linkpath);
+}
+
+/**
+ * \internal
+ * _readlink_r: read symlinks
+ */
+ssize_t _readlink_r(struct _reent *ptr, const char *path, char *buf, size_t size)
+{
+    #ifdef WITH_FILESYSTEM
+
+    #ifndef __NO_EXCEPTIONS
+    try {
+    #endif //__NO_EXCEPTIONS
+        int result=miosix::getFileDescriptorTable().readlink(path,buf,size);
+        if(result>=0) return result;
+        ptr->_errno=-result;
+        return -1;
+    #ifndef __NO_EXCEPTIONS
+    } catch(exception& e) {
+        ptr->_errno=ENOMEM;
+        return -1;
+    }
+    #endif //__NO_EXCEPTIONS
+
+    #else //WITH_FILESYSTEM
+    (void)path;
+    (void)buf;
+    (void)size;
+
+    ptr->_errno=ENOENT;
+    return -1;
+    #endif //WITH_FILESYSTEM
+}
+
+ssize_t readlink(const char *path, char *buf, size_t size)
+{
+    return _readlink_r(miosix::getReent(),path,buf,size);
+}
+
+/**
+ * \internal
+ * truncate, change file size
+ */
+int truncate(const char *path, off_t size)
+{
+    #ifdef WITH_FILESYSTEM
+
+    #ifndef __NO_EXCEPTIONS
+    try {
+    #endif //__NO_EXCEPTIONS
+        int result=miosix::getFileDescriptorTable().truncate(path,size);
+        if(result>=0) return result;
+        miosix::getReent()->_errno=-result;
+        return -1;
+    #ifndef __NO_EXCEPTIONS
+    } catch(exception& e) {
+        miosix::getReent()->_errno=ENOMEM;
+        return -1;
+    }
+    #endif //__NO_EXCEPTIONS
+
+    #else //WITH_FILESYSTEM
+    (void)path;
+    (void)size;
+
+    miosix::getReent()->_errno=ENOENT;
+    return -1;
+    #endif //WITH_FILESYSTEM
+}
+
+/**
+ * \internal
+ * ftruncate, change file size
+ */
+int ftruncate(int fd, off_t size)
+{
+    #ifdef WITH_FILESYSTEM
+
+    #ifndef __NO_EXCEPTIONS
+    try {
+    #endif //__NO_EXCEPTIONS
+        int result=miosix::getFileDescriptorTable().ftruncate(fd,size);
+        if(result>=0) return result;
+        miosix::getReent()->_errno=-result;
+        return -1;
+    #ifndef __NO_EXCEPTIONS
+    } catch(exception& e) {
+        miosix::getReent()->_errno=ENOMEM;
+        return -1;
+    }
+    #endif //__NO_EXCEPTIONS
+
+    #else //WITH_FILESYSTEM
+    (void)fd;
+    (void)size;
+
+    miosix::getReent()->_errno=EBADF;
+    return -1;
+    #endif //WITH_FILESYSTEM
+}
+
+/**
+ * \internal
  * _rename_r, rename a file or directory
  */
 int _rename_r(struct _reent *ptr, const char *f_old, const char *f_new)
@@ -897,18 +1053,14 @@ int rename(const char *f_old, const char *f_new)
  * \internal
  * getdents, allows to list the content of a directory
  */
-int getdents(unsigned int fd, struct dirent *dirp, unsigned int count)
+int getdents(int fd, struct dirent *buf, unsigned int size)
 {
-    (void)fd;
-    (void)dirp;
-    (void)count;
-
     #ifdef WITH_FILESYSTEM
 
     #ifndef __NO_EXCEPTIONS
     try {
     #endif //__NO_EXCEPTIONS
-        int result=miosix::getFileDescriptorTable().getdents(fd,dirp,count);
+        int result=miosix::getFileDescriptorTable().getdents(fd,buf,size);
         if(result>=0) return result;
         miosix::getReent()->_errno=-result;
         return -1;
@@ -920,13 +1072,93 @@ int getdents(unsigned int fd, struct dirent *dirp, unsigned int count)
     #endif //__NO_EXCEPTIONS
     
     #else //WITH_FILESYSTEM
+    (void)fd;
+    (void)buf;
+    (void)size;
+
     miosix::getReent()->_errno=ENOENT;
     return -1;
     #endif //WITH_FILESYSTEM
 }
 
+int dup(int fd)
+{
+    #ifdef WITH_FILESYSTEM
 
+    #ifndef __NO_EXCEPTIONS
+    try {
+    #endif //__NO_EXCEPTIONS
+        int result=miosix::getFileDescriptorTable().dup(fd);
+        if(result>=0) return result;
+        miosix::getReent()->_errno=-result;
+        return -1;
+    #ifndef __NO_EXCEPTIONS
+    } catch(exception& e) {
+        miosix::getReent()->_errno=ENOMEM;
+        return -1;
+    }
+    #endif //__NO_EXCEPTIONS
 
+    #else //WITH_FILESYSTEM
+    (void)fd;
+
+    miosix::getReent()->_errno=ENOENT;
+    return -1;
+    #endif //WITH_FILESYSTEM
+}
+
+int dup2(int oldfd, int newfd)
+{
+    #ifdef WITH_FILESYSTEM
+
+    #ifndef __NO_EXCEPTIONS
+    try {
+    #endif //__NO_EXCEPTIONS
+        int result=miosix::getFileDescriptorTable().dup2(oldfd,newfd);
+        if(result>=0) return result;
+        miosix::getReent()->_errno=-result;
+        return -1;
+    #ifndef __NO_EXCEPTIONS
+    } catch(exception& e) {
+        miosix::getReent()->_errno=ENOMEM;
+        return -1;
+    }
+    #endif //__NO_EXCEPTIONS
+
+    #else //WITH_FILESYSTEM
+    (void)oldfd;
+    (void)newfd;
+
+    miosix::getReent()->_errno=ENOENT;
+    return -1;
+    #endif //WITH_FILESYSTEM
+}
+
+int pipe(int fds[2])
+{
+    #ifdef WITH_FILESYSTEM
+
+    #ifndef __NO_EXCEPTIONS
+    try {
+    #endif //__NO_EXCEPTIONS
+        int result=miosix::getFileDescriptorTable().pipe(fds);
+        if(result>=0) return result;
+        miosix::getReent()->_errno=-result;
+        return -1;
+    #ifndef __NO_EXCEPTIONS
+    } catch(exception& e) {
+        miosix::getReent()->_errno=ENOMEM;
+        return -1;
+    }
+    #endif //__NO_EXCEPTIONS
+
+    #else //WITH_FILESYSTEM
+    (void)fds;
+
+    miosix::getReent()->_errno=ENOENT;
+    return -1;
+    #endif //WITH_FILESYSTEM
+}
 
 /*
  * Time API in Miosix
@@ -1013,19 +1245,25 @@ clock_t _times_r(struct _reent *ptr, struct tms *tim)
     if(clock_gettime(CLOCK_MONOTONIC,&tp)) return static_cast<clock_t>(-1);
     constexpr int divFactor=1000000000/CLOCKS_PER_SEC;
     clock_t utime=tp.tv_sec*CLOCKS_PER_SEC + tp.tv_nsec/divFactor;
-    
-    //Actually, we should return tim.utime or -1 on failure, but clock_t is
-    //unsigned, so if we return tim.utime and someone calls _times_r in an
-    //unlucky moment where tim.utime is 0xffffffff it would be interpreted as -1
-    //IMHO, the specifications are wrong since returning an unsigned leaves
-    //no value left to return in case of errors. Thus 0 is returned if a valid
-    //pointer is passed, and tim.utime if the pointer is null
-    if(tim==nullptr) return utime;
-    tim->tms_utime=utime;
-    tim->tms_stime=0;
-    tim->tms_cutime=0;
-    tim->tms_cstime=0;
-    return 0;
+
+    //Unfortunately, the behavior of _times_r is poorly specified and ambiguous.
+    //The return value is either tim.utime or -1 on failure, but clock_t is
+    //unsigned. If someone calls _times_r in an unlucky moment where tim.utime
+    //is 0xffffffff it could be interpreted as the -1 error code even if there
+    //is no error.
+    //This is not as unlikely as it seems because CLOCKS_PER_SEC is a relatively
+    //huge number (100 for Miosix's implementation).
+    //To solve the ambiguity Miosix never returns 0xffffffff except in case of
+    //error. If tim.utime happens to be 0xffffffff, _times_r returns 0 instead.
+    //We also implement the Linux extension where tim can be NULL.
+    if(tim!=nullptr)
+    {
+        tim->tms_utime=utime;
+        tim->tms_stime=0;
+        tim->tms_cutime=0;
+        tim->tms_cstime=0;
+    }
+    return utime==static_cast<clock_t>(-1)?0:utime;
 }
 
 clock_t times(struct tms *tim)
@@ -1069,7 +1307,7 @@ int _kill_r(struct _reent* ptr, int pid, int sig)
     (void)ptr;
     (void)sig;
 
-    if(pid==0) _exit(1); //pid=1 means the only running process
+    if(pid==0) _exit(1); //pid 0 is the kernel
     else return -1;
 }
 
@@ -1080,7 +1318,7 @@ int kill(int pid, int sig)
 
 /**
  * \internal
- * _getpid_r, there is only one process in Miosix (but multiple threads)
+ * _getpid_r, the kernel has pid 0 so getpid return 0 in the kernel
  */
 int _getpid_r(struct _reent* ptr)
 {
@@ -1091,43 +1329,88 @@ int _getpid_r(struct _reent* ptr)
 
 /**
  * \internal
- * getpid, there is only one process in Miosix (but multiple threads)
+ * getpid, the kernel has pid 0 so getpid return 0 in the kernel
  */
 int getpid()
 {
-    return _getpid_r(miosix::getReent());
+    return 0;
 }
 
 /**
  * \internal
- * _wait_r, unimpemented because processes are not supported in Miosix
+ * getppid, the kernel has no parent, in the kernel getppid returns 0
+ */
+int getppid()
+{
+    return 0;
+}
+
+/**
+ * \internal
+ * _wait_r, wait for process termination
  */
 int _wait_r(struct _reent *ptr, int *status)
 {
+    #ifdef WITH_PROCESSES
+    int result=miosix::Process::wait(status);
+    if(result>=0) return result;
+    ptr->_errno=-result;
+    return -1;
+    #else //WITH_PROCESSES
     (void)ptr;
     (void)status;
 
     return -1;
+    #endif //WITH_PROCESSES
 }
 
-int wait(int *status)
+pid_t wait(int *status)
 {
     return _wait_r(miosix::getReent(),status);
 }
 
 /**
  * \internal
- * _execve_r, unimpemented because processes are not supported in Miosix
+ * waitpid, wait for process termination
+ */
+pid_t waitpid(pid_t pid, int *status, int options)
+{
+    #ifdef WITH_PROCESSES
+    int result=miosix::Process::waitpid(pid,status,options);
+    if(result>=0) return result;
+    errno=-result;
+    return -1;
+    #else //WITH_PROCESSES
+    (void)pid;
+    (void)status;
+    (void)options;
+
+    return -1;
+    #endif //WITH_PROCESSES
+}
+
+/**
+ * \internal
+ * _execve_r, always fails when called from kernelspace because the kernel
+ * cannot be switched for another program
  */
 int _execve_r(struct _reent *ptr, const char *path, char *const argv[],
         char *const env[])
 {
+    #ifdef WITH_PROCESSES
+    (void)path;
+    (void)argv;
+    (void)env;
+    ptr->_errno=-EFAULT;
+    return -1;
+    #else //WITH_PROCESSES
     (void)ptr;
     (void)path;
     (void)argv;
     (void)env;
 
     return -1;
+    #endif //WITH_PROCESSES
 }
 
 int execve(const char *path, char *const argv[], char *const env[])
@@ -1137,22 +1420,41 @@ int execve(const char *path, char *const argv[], char *const env[])
 
 /**
  * \internal
- * _forkexecve_r, reserved for future use
+ * posix_spawn, spawn child processes
  */
-pid_t _forkexecve_r(struct _reent *ptr, const char *path, char *const argv[],
-        char *const env[])
+int posix_spawn(pid_t *pid, const char *path,
+        const posix_spawn_file_actions_t *a, const posix_spawnattr_t *s,
+        char *const argv[], char *const envp[])
 {
-    (void)ptr;
+    #ifdef WITH_PROCESSES
+
+    #ifndef __NO_EXCEPTIONS
+    try {
+    #endif //__NO_EXCEPTIONS
+        if(a!=nullptr || s!=nullptr) return EFAULT; //Not supported yet
+        pid_t result=miosix::Process::spawn(path,argv,envp);
+        if(result>=0)
+        {
+            if(pid) *pid=result;
+            return 0;
+        }
+        return -result;
+    #ifndef __NO_EXCEPTIONS
+    } catch(exception& e) {
+        return ENOMEM;
+    }
+    #endif //__NO_EXCEPTIONS
+
+    #else //WITH_PROCESSES
+    (void)pid;
     (void)path;
+    (void)a;
+    (void)s;
     (void)argv;
-    (void)env;
-
-    return -1;
-}
-
-pid_t forkexecve(const char *path, char *const argv[], char *const env[])
-{
-    return _forkexecve_r(miosix::getReent(),path,argv,env);
+    (void)envp;
+    
+    return 1;
+    #endif //WITH_PROCESSES
 }
 
 #ifdef __cplusplus

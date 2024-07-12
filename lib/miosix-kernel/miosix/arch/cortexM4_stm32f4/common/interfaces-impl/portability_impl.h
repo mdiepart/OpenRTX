@@ -32,6 +32,7 @@
 #include "interfaces/arch_registers.h"
 #include "interfaces/portability.h"
 #include "config/miosix_settings.h"
+#include <cassert>
 
 /**
  * \addtogroup Drivers
@@ -79,7 +80,6 @@ const int stackPtrOffsetInCtxsave=0; ///< Allows to locate the stack pointer
  * running on the stm32f429zi_stm32f4discovery.
  */
 #define saveContext()                                                         \
-{                                                                              \
     asm volatile("   mrs    r1,  psp            \n"/*get PROCESS stack ptr  */ \
                  "   ldr    r0,  =ctxsave       \n"/*get current context    */ \
                  "   ldr    r0,  [r0]           \n"                            \
@@ -88,8 +88,7 @@ const int stackPtrOffsetInCtxsave=0; ///< Allows to locate the stack pointer
                  "   bmi    0f                  \n"                            \
                  "   vstmia.32 r0, {s16-s31}    \n"/*save s16-s31 if we need*/ \
                  "0: dmb                        \n"                            \
-                 );                                                            \
-}
+                 );                                                            
 
 /**
  * \def restoreContext()
@@ -98,7 +97,6 @@ const int stackPtrOffsetInCtxsave=0; ///< Allows to locate the stack pointer
  * prevent the compiler from generating context restore.
  */
 #define restoreContext()                                                      \
-{                                                                              \
     asm volatile("   ldr    r0,  =ctxsave       \n"/*get current context    */ \
                  "   ldr    r0,  [r0]           \n"                            \
                  "   ldmia  r0!, {r1,r4-r11,lr} \n"/*load r1(psp),r4-r11,lr */ \
@@ -107,8 +105,7 @@ const int stackPtrOffsetInCtxsave=0; ///< Allows to locate the stack pointer
                  "   vldmia.32 r0, {s16-s31}    \n"/*restore s16-s31 if need*/ \
                  "0: msr    psp, r1             \n"/*restore PROCESS sp*/      \
                  "   bx     lr                  \n"/*return*/                  \
-                 );                                                            \
-}
+                 );
 
 /**
  * \}
@@ -157,6 +154,19 @@ inline bool checkAreInterruptsEnabled()
 
 #ifdef WITH_PROCESSES
 
+namespace {
+/*
+ * ARM syscall parameter mapping
+ * Syscall id is r3, saved at registers[3]
+ *
+ * Parameter 1 is r0, saved at registers[0]
+ * Parameter 2 is r1, saved at registers[1]
+ * Parameter 3 is r2, saved at registers[2]
+ * Parameter 4 is r12, saved at registers[4]
+ */
+constexpr unsigned int armSyscallMapping[]={0,1,2,4};
+}
+
 //
 // class SyscallParameters
 //
@@ -169,24 +179,16 @@ inline int SyscallParameters::getSyscallId() const
     return registers[3];
 }
 
-inline unsigned int SyscallParameters::getFirstParameter() const
+inline unsigned int SyscallParameters::getParameter(unsigned int index) const
 {
-    return registers[0];
+    assert(index<4);
+    return registers[armSyscallMapping[index]];
 }
 
-inline unsigned int SyscallParameters::getSecondParameter() const
+inline void SyscallParameters::setParameter(unsigned int index, unsigned int value)
 {
-    return registers[1];
-}
-
-inline unsigned int SyscallParameters::getThirdParameter() const
-{
-    return registers[2];
-}
-
-inline void SyscallParameters::setReturnValue(unsigned int ret)
-{
-    registers[0]=ret;
+    assert(index<4);
+    registers[armSyscallMapping[index]]=value;
 }
 
 inline void portableSwitchToUserspace()

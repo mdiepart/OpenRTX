@@ -42,31 +42,42 @@
 
 namespace miosix {
 
-class MK22FlexTimer0 : public TimerAdapter<MK22FlexTimer0, 16>
+class NXPFlexTimer0
 {
 public:
-    static inline unsigned int IRQgetTimerCounter() { return FTM0->CNT; }
+    static inline FTM_Type *get() { return FTM0; }
+    static inline IRQn_Type getIRQn() { return FTM0_IRQn; }
+    static inline void enableClock() { SIM->SCGC6 |= SIM_SCGC6_FTM0(1); }
+};
+#define IRQ_HANDLER_NAME FTM0_IRQHandler
+#define TIMER_HW_CLASS NXPFlexTimer0
+
+template<class T>
+class MK22FlexTimer : public TimerAdapter<MK22FlexTimer<T>, 16>
+{
+public:   
+    static inline unsigned int IRQgetTimerCounter() { return T::get()->CNT; }
     static inline void IRQsetTimerCounter(unsigned int v)
     {
-        FTM0->CNTIN = v;
+        T::get()->CNTIN = v;
         __NOP();
-        FTM0->CNT = v; // When CNT is written to, it gets updated with CNTIN value
-        FTM0->CNTIN = 0;
+        T::get()->CNT = v; // When CNT is written to, it gets updated with CNTIN value
+        T::get()->CNTIN = 0;
     }
 
-    static inline unsigned int IRQgetTimerMatchReg() { return FTM0->CONTROLS[0].CnV; }
-    static inline void IRQsetTimerMatchReg(unsigned int v) { FTM0->CONTROLS[0].CnV=v; }
+    static inline unsigned int IRQgetTimerMatchReg() { return T::get()->CONTROLS[0].CnV; }
+    static inline void IRQsetTimerMatchReg(unsigned int v) { T::get()->CONTROLS[0].CnV=v; }
 
-    static inline bool IRQgetOverflowFlag() { return FTM0->SC & FTM_SC_TOF_MASK; }
-    static inline void IRQclearOverflowFlag() { FTM0->SC &= ~FTM_SC_TOF(1); } // This will only work if SC was read while TOF was set and setting the bit to 0.
+    static inline bool IRQgetOverflowFlag() { return T::get()->SC & FTM_SC_TOF_MASK; }
+    static inline void IRQclearOverflowFlag() { T::get()->SC &= ~FTM_SC_TOF(1); } // This will only work if SC was read while TOF was set and setting the bit to 0.
     
-    static inline bool IRQgetMatchFlag() { return FTM0->CONTROLS[0].CnSC & FTM_CnSC_CHF(1); }
-    static inline void IRQclearMatchFlag() { FTM0->CONTROLS[0].CnSC &= ~FTM_CnSC_CHF(1); }
+    static inline bool IRQgetMatchFlag() { return T::get()->CONTROLS[0].CnSC & FTM_CnSC_CHF(1); }
+    static inline void IRQclearMatchFlag() { T::get()->CONTROLS[0].CnSC &= ~FTM_CnSC_CHF(1); }
     
-    static inline void IRQforcePendingIrq() { NVIC_SetPendingIRQ(FTM0_IRQn); }
+    static inline void IRQforcePendingIrq() { NVIC_SetPendingIRQ(T::getIRQn()); }
 
-    static inline void IRQstopTimer() { FTM0->SC &= ~FTM_SC_CLKS(3); }
-    static inline void IRQstartTimer() { FTM0->SC |= FTM_SC_CLKS(1); }
+    static inline void IRQstopTimer() { T::get()->SC &= ~FTM_SC_CLKS(3); }
+    static inline void IRQstartTimer() { T::get()->SC |= FTM_SC_CLKS(1); }
     
     static unsigned int IRQTimerFrequency()
     {
@@ -78,51 +89,51 @@ public:
         
         uint32_t mcgoutClock = SystemCoreClock * (((SIM->CLKDIV1 & SIM_CLKDIV1_OUTDIV1_MASK) >> SIM_CLKDIV1_OUTDIV1_SHIFT) + 1);
         uint32_t busClock = mcgoutClock / (((SIM->CLKDIV1 & SIM_CLKDIV1_OUTDIV2_MASK) >> SIM_CLKDIV1_OUTDIV2_SHIFT) + 1);
-        uint32_t freq = busClock >> (FTM0->SC & FTM_SC_PS_MASK);
+        uint32_t freq = busClock >> (T::get()->SC & FTM_SC_PS_MASK);
         return freq;
     }
     
     static void IRQinitTimer()
     {
-        // Enable clock to FTM0
+        // Enable clock to FTM
         SIM->SCGC6 |= SIM_SCGC6_FTM0(1);
 
         // Set counter to count up to maximum value, counter initializes at 0
-        FTM0->CNTIN = 0x0000;
-        FTM0->MOD = 0xFFFF;
+        T::get()->CNTIN = 0x0000;
+        T::get()->MOD = 0xFFFF;
 
         // Set output compare mode without gpio output but with
         // interrupt enabled
-        FTM0->CONTROLS[0].CnSC = FTM_CnSC_CHF(0) | FTM_CnSC_CHIE(1) |
+        T::get()->CONTROLS[0].CnSC = FTM_CnSC_CHF(0) | FTM_CnSC_CHIE(1) |
                                  FTM_CnSC_MSB(0) | FTM_CnSC_MSA(1) | 
                                  FTM_CnSC_ELSB(0) | FTM_CnSC_ELSA(0) |
                                  FTM_CnSC_ICRST(0) | FTM_CnSC_DMA(0);
         
         // Enable interrupts, keep timer disabled, set prescaler to 4
-        FTM0->SC = FTM_SC_TOF(0) | FTM_SC_TOIE(1) | FTM_SC_CPWMS(0) |
+        T::get()->SC = FTM_SC_TOF(0) | FTM_SC_TOIE(1) | FTM_SC_CPWMS(0) |
                    FTM_SC_CLKS(0) | FTM_SC_PS(2);
 
         // Enable interrupts for FTM0
-        NVIC_SetPriority(FTM0_IRQn, 3); //High priority for FTM0 (Max=0, min=15)
-        NVIC_EnableIRQ(FTM0_IRQn);
+        NVIC_SetPriority(T::getIRQn(), 3); //High priority for FTM0 (Max=0, min=15)
+        NVIC_EnableIRQ(T::getIRQn());
      
         // FTMEN set to 0, when writing to registers, their value 
         // is updated:
         //  - next system clock cycle for CNTIN
         //  - when FTM counter changes from MOD to CNTIN for MOD
         //  - when the FTM counter updates for CnV
-        FTM0->MODE = FTM_MODE_FAULTIE(0) | FTM_MODE_FAULTM(0) |
+        T::get()->MODE = FTM_MODE_FAULTIE(0) | FTM_MODE_FAULTM(0) |
                      FTM_MODE_CAPTEST(0) | FTM_MODE_PWMSYNC(0) |
                      FTM_MODE_WPDIS(0) | FTM_MODE_INIT(0) |
                      FTM_MODE_FTMEN(0);
     }
 };
 
-static MK22FlexTimer0 timer;
+static MK22FlexTimer<TIMER_HW_CLASS> timer;
 DEFAULT_OS_TIMER_INTERFACE_IMPLMENTATION(timer);
 } //namespace miosix
 
-void __attribute__((naked)) FTM0_IRQHandler()
+void __attribute__((naked)) IRQ_HANDLER_NAME()
 {
     saveContext();
     asm volatile ("bl _Z11osTimerImplv");

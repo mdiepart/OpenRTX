@@ -29,6 +29,7 @@
 #pragma once
 
 #include "kernel.h"
+#include "kernel/scheduler/scheduler.h"
 #include "intrusive.h"
 #include <vector>
 
@@ -58,17 +59,7 @@ public:
     /**
      * Constructor, initializes the mutex.
      */
-    FastMutex(Options opt=DEFAULT)
-    {
-        if(opt==RECURSIVE)
-        {
-            pthread_mutexattr_t temp;
-            pthread_mutexattr_init(&temp);
-            pthread_mutexattr_settype(&temp,PTHREAD_MUTEX_RECURSIVE);
-            pthread_mutex_init(&impl,&temp);
-            pthread_mutexattr_destroy(&temp);
-        } else pthread_mutex_init(&impl,nullptr);
-    }
+    FastMutex(Options opt=DEFAULT);
 
     /**
      * Locks the critical section. If the critical section is already locked,
@@ -575,12 +566,29 @@ public:
     Semaphore(unsigned int initialCount=0) : count(initialCount) {}
 
     /**
+     * Increment the semaphore counter, putting threads out of sleep without
+     * triggering a reschedule.
+     * Only for use in IRQ handlers.
+     * \param hppw is set to `true' if a scheduler update is necessary to
+     * wake up a formerly sleeping thread with `Scheduler::IRQfindNextThread()`.
+     * Otherwise it is not modified.
+     * \warning Use in a thread context with interrupts disabled or with the
+     * kernel paused is forbidden.
+     */
+    void IRQsignal(bool& hppw);
+
+    /**
      * Increment the semaphore counter, waking up at most one waiting thread.
      * Only for use in IRQ handlers.
      * \warning Use in a thread context with interrupts disabled or with the
      * kernel paused is forbidden.
      */
-    void IRQsignal();
+    void IRQsignal()
+    {
+        bool hppw=false;
+        IRQsignal(hppw);
+        if(hppw) Scheduler::IRQfindNextThread();
+    }
 
     /**
      * Increment the semaphore counter, waking up at most one waiting thread.
@@ -626,6 +634,29 @@ public:
         // Global interrupt lock because Semaphore is IRQ-safe
         FastInterruptDisableLock dLock;
         return IRQtryWait();
+    }
+
+    /**
+     * Resets the counter to zero, and returns the old count. Only for use in
+     * IRQ handlers or with interrupts disabled.
+     * \return The previous counter value.
+     */
+    inline int IRQreset()
+    {
+        int old=count;
+        count=0;
+        return old;
+    }
+
+    /**
+     * Resets the counter to zero, and returns the old count.
+     * \return The previous counter value.
+     */
+    int reset()
+    {
+        // Global interrupt lock because Semaphore is IRQ-safe
+        FastInterruptDisableLock dLock;
+        return IRQreset();
     }
 
     /**

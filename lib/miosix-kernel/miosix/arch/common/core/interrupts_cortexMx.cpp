@@ -94,25 +94,25 @@ void __attribute__((noinline)) HardFault_impl()
 {
     #ifdef WITH_PROCESSES
     if(miosix::Thread::IRQreportFault(miosix_private::FaultData(
-        HARDFAULT,getProgramCounter()))) return;
+        fault::HARDFAULT,getProgramCounter()))) return;
     #endif //WITH_PROCESSES
     #ifdef WITH_ERRLOG
     IRQerrorLog("\r\n***Unexpected HardFault @ ");
     printUnsignedInt(getProgramCounter());
-    #if !defined(_ARCH_CORTEXM0_STM32F0) && !defined(_ARCH_CORTEXM0_STM32G0) && !defined(_ARCH_CORTEXM0_STM32L0)
+    #if !defined(_ARCH_CORTEXM0_STM32F0) && !defined(_ARCH_CORTEXM0_STM32G0) && !defined(_ARCH_CORTEXM0PLUS_STM32L0) && !defined(_ARCH_CORTEXM0PLUS_RP2040)
     unsigned int hfsr=SCB->HFSR;
     if(hfsr & 0x40000000) //SCB_HFSR_FORCED
         IRQerrorLog("Fault escalation occurred\r\n");
     if(hfsr & 0x00000002) //SCB_HFSR_VECTTBL
         IRQerrorLog("A BusFault occurred during a vector table read\r\n");
-    #endif // !_ARCH_CORTEXM0_STM32F0 && !_ARCH_CORTEXM0_STM32G0 && !_ARCH_CORTEXM0_STM32L0
+    #endif // !_ARCH_CORTEXM0_STM32F0 && !_ARCH_CORTEXM0_STM32G0 && !_ARCH_CORTEXM0PLUS_STM32L0
     #endif //WITH_ERRLOG
     miosix_private::IRQsystemReboot();
 }
 
 // Cortex M0/M0+ architecture does not have the interrupts handled by code
 // below this point
-#if !defined(_ARCH_CORTEXM0_STM32F0) && !defined(_ARCH_CORTEXM0_STM32G0) && !defined(_ARCH_CORTEXM0_STM32L0)
+#if !defined(_ARCH_CORTEXM0_STM32F0) && !defined(_ARCH_CORTEXM0_STM32G0) && !defined(_ARCH_CORTEXM0PLUS_STM32L0) && !defined(_ARCH_CORTEXM0PLUS_RP2040)
 
 void __attribute__((naked)) MemManage_Handler()
 {
@@ -129,9 +129,9 @@ void __attribute__((noinline)) MemManage_impl()
     #endif //WITH_PROCESSES || WITH_ERRLOG
     #ifdef WITH_PROCESSES
     int id, arg=0;
-    if(cfsr & 0x00000001) id=MP_XN;
-    else if(cfsr & 0x00000080) { id=MP; arg=SCB->MMFAR; }
-    else id=MP_NOADDR;
+    if(cfsr & 0x00000001) id=fault::MP_XN;
+    else if(cfsr & 0x00000080) { id=fault::MP; arg=SCB->MMFAR; }
+    else id=fault::MP_NOADDR;
     if(miosix::Thread::IRQreportFault(miosix_private::FaultData(
         id,getProgramCounter(),arg)))
     {
@@ -174,8 +174,8 @@ void __attribute__((noinline)) BusFault_impl()
     #endif //WITH_PROCESSES || WITH_ERRLOG
     #ifdef WITH_PROCESSES
     int id, arg=0;
-    if(cfsr & 0x00008000) { id=BF; arg=SCB->BFAR; }
-    else id=BF_NOADDR;
+    if(cfsr & 0x00008000) { id=fault::BF; arg=SCB->BFAR; }
+    else id=fault::BF_NOADDR;
     if(miosix::Thread::IRQreportFault(miosix_private::FaultData(
         id,getProgramCounter(),arg)))
     {
@@ -220,13 +220,13 @@ void __attribute__((noinline)) UsageFault_impl()
     #endif //WITH_PROCESSES || WITH_ERRLOG
     #ifdef WITH_PROCESSES
     int id;
-    if(cfsr & 0x02000000) id=UF_DIVZERO;
-    else if(cfsr & 0x01000000) id=UF_UNALIGNED;
-    else if(cfsr & 0x00080000) id=UF_COPROC;
-    else if(cfsr & 0x00040000) id=UF_EXCRET;
-    else if(cfsr & 0x00020000) id=UF_EPSR;
-    else if(cfsr & 0x00010000) id=UF_UNDEF;
-    else id=UF_UNEXP;
+    if(cfsr & 0x02000000) id=fault::UF_DIVZERO;
+    else if(cfsr & 0x01000000) id=fault::UF_UNALIGNED;
+    else if(cfsr & 0x00080000) id=fault::UF_COPROC;
+    else if(cfsr & 0x00040000) id=fault::UF_EXCRET;
+    else if(cfsr & 0x00020000) id=fault::UF_EPSR;
+    else if(cfsr & 0x00010000) id=fault::UF_UNDEF;
+    else id=fault::UF_UNEXP;
     if(miosix::Thread::IRQreportFault(miosix_private::FaultData(
         id,getProgramCounter())))
     {
@@ -262,7 +262,7 @@ void DebugMon_Handler()
     miosix_private::IRQsystemReboot();
 }
 
-#endif // !_ARCH_CORTEXM0_STM32F0 && !_ARCH_CORTEXM0_STM32G0 && !_ARCH_CORTEXM0_STM32L0
+#endif // !defined(_ARCH_CORTEXM0_STM32F0) && !defined(_ARCH_CORTEXM0_STM32G0) && !defined(_ARCH_CORTEXM0PLUS_STM32L0) && !defined(_ARCH_CORTEXM0PLUS_RP2040)
 
 void PendSV_Handler()
 {

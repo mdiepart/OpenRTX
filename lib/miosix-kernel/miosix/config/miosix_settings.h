@@ -95,7 +95,34 @@ namespace miosix {
 /// Allows to enable/disable DevFs support to save code size
 /// By default it is defined (DevFs is enabled)
 // #define WITH_DEVFS
-    
+
+/// \def WITH_FATFS
+/// Allows to enable/disable FATFS support to save code size
+/// By default it is defined (FATFS is enabled)
+// #define WITH_FATFS
+/// Maxium number of files that can be opened on a mounted FATFS partition.
+/// Must be greater than 0
+constexpr unsigned char FATFS_MAX_OPEN_FILES=8;
+/// The truncate/ftruncate operations, and seeking past the end of the file are
+/// two patterns for zero-filling a file. This requires a buffer to be done
+/// efficiently, and the size of the buffer impacts performance. To save RAM the
+/// suggested value is 512 byte, for performance 4096 or even 16384 are better.
+/// Note that no buffer is allocated unless required, the buffer is deallocated
+/// afterwards, and the worst case memory required is one buffer per mounted
+/// FATFS partition if one concurrent truncate/write past the end per partition
+/// occurs.
+constexpr unsigned int FATFS_EXTEND_BUFFER=512;
+
+/// \def WITH_LITTLEFS
+/// Allows to enable/disable LittleFS support to save code size
+/// By default it is not defined (LittleFS is disabled)
+//#define WITH_LITTLEFS
+
+/// \def WITH_ROMFS
+/// Allows to enable/disable RomFS support to save code size
+/// By default it is not defined (RomFS is disabled)
+//#define WITH_ROMFS
+
 /// \def SYNC_AFTER_WRITE
 /// Increases filesystem write robustness. After each write operation the
 /// filesystem is synced so that a power failure happens data is not lost
@@ -104,8 +131,10 @@ namespace miosix {
 /// By default it is defined (slow but safe)
 // #define SYNC_AFTER_WRITE
 
-/// Maximum number of open files. Trying to open more will fail.
-/// Cannot be lower than 3, as the first three are stdin, stdout, stderr
+/// Maximum number of files a single process (or the kernel) can open. This
+/// constant is used to size file descriptor tables. Individual filesystems can
+/// introduce futher limitations. Cannot be less than 3, as the first three are
+/// stdin, stdout, stderr, and in this case no additional files can be opened.
 const unsigned char MAX_OPEN_FILES=8;
 
 /// \def WITH_PROCESSES
@@ -114,18 +143,11 @@ const unsigned char MAX_OPEN_FILES=8;
 /// call service and, if the hardware supports it, the MPU to provide memory
 /// isolation of processes
 //#define WITH_PROCESSES
-
-#if defined(WITH_PROCESSES) && defined(__NO_EXCEPTIONS)
-#error Processes require C++ exception support
-#endif //defined(WITH_PROCESSES) && defined(__NO_EXCEPTIONS)
-
-#if defined(WITH_PROCESSES) && !defined(WITH_FILESYSTEM)
-#error Processes require filesystem support
-#endif //defined(WITH_PROCESSES) && !defined(WITH_FILESYSTEM)
-
-#if defined(WITH_PROCESSES) && !defined(WITH_DEVFS)
-#error Processes require devfs support
-#endif //defined(WITH_PROCESSES) && !defined(WITH_DEVFS)
+/// RomFS is enabled by default when using processes. Comment the following
+/// lines if you want to use processes without RomFS.
+#if defined(WITH_PROCESSES) && !defined(WITH_ROMFS)
+#define WITH_ROMFS
+#endif
 
 //
 // C/C++ standard library I/O (stdin, stdout and stderr related)
@@ -173,7 +195,7 @@ const unsigned int STACK_IDLE=256;
 
 /// Default stack size for pthread_create.
 /// The chosen value is enough to call C standard library functions
-/// such as printf/fopen which are stack-heavy
+/// such as printf/fopen which are stack-heavy (MUST be divisible by 4)
 const unsigned int STACK_DEFAULT_FOR_PTHREAD=2048;
 
 /// Maximum size of the RAM image of a process. If a program requires more
@@ -182,13 +204,27 @@ const unsigned int MAX_PROCESS_IMAGE_SIZE=64*1024;
 
 /// Minimum size of the stack for a process. If a program specifies a lower
 /// size the kernel will not run it (MUST be divisible by 4)
-const unsigned int MIN_PROCESS_STACK_SIZE=STACK_MIN;
+const unsigned int MIN_PROCESS_STACK_SIZE=1024;
 
 /// Every userspace thread has two stacks, one for when it is running in
 /// userspace and one for when it is running in kernelspace (that is, while it
 /// is executing system calls). This is the size of the stack for when the
 /// thread is running in kernelspace (MUST be divisible by 4)
-const unsigned int SYSTEM_MODE_PROCESS_STACK_SIZE=2*1024;
+const unsigned int SYSTEM_MODE_PROCESS_STACK_SIZE=2048;
+
+/// Maximum number of arguments passed through argv to a process
+/// Also maximum number of environment variables passed through envp to a process
+const unsigned int MAX_PROCESS_ARGS=16;
+
+/// Maximum size of the memory area at the top of the stack for arguments and
+/// environment variables. This area is not considered part of the stack and
+/// does not contribute to the stack size.
+const unsigned int MAX_PROCESS_ARGS_BLOCK_SIZE=512;
+
+static_assert(STACK_IDLE>=STACK_MIN,"");
+static_assert(STACK_DEFAULT_FOR_PTHREAD>=STACK_MIN,"");
+static_assert(MIN_PROCESS_STACK_SIZE>=STACK_MIN,"");
+static_assert(SYSTEM_MODE_PROCESS_STACK_SIZE>=STACK_MIN,"");
 
 /// Number of priorities (MUST be >1)
 /// PRIORITY_MAX-1 is the highest priority, 0 is the lowest. -1 is reserved as

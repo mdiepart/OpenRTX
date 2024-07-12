@@ -119,8 +119,8 @@ int pthread_attr_init(pthread_attr_t *attr)
 
 int pthread_attr_destroy(pthread_attr_t *attr)
 {
-    (void) attr;
-    
+    (void)attr;
+
     return 0; //That was easy
 }
 
@@ -203,7 +203,7 @@ int	pthread_mutexattr_init(pthread_mutexattr_t *attr)
 int	pthread_mutexattr_destroy(pthread_mutexattr_t *attr)
 {
     (void)attr;
-
+    
     return 0; //Do nothing
 }
 
@@ -421,14 +421,13 @@ int pthread_once(pthread_once_t *once, void (*func)())
     return 0;
 }
 
-int pthread_setcancelstate(int state, int *oldstate) 
+int pthread_setcancelstate(int state, int *oldstate)
 {
-    //Stub
     (void)state;
     (void)oldstate;
 
-     return 0; 
-} 
+    return 0;
+} //Stub
 
 } //extern "C"
 

@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2013 by Terraneo Federico                               *
+ *   Copyright (C) 2013-2024 by Terraneo Federico                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -25,13 +25,13 @@
  *   along with this program; if not, see <http://www.gnu.org/licenses/>   *
  ***************************************************************************/
 
+#include <fcntl.h>
 #include <dirent.h>
 #include <sys/stat.h>
 #include "kernel/intrusive.h"
 #include "config/miosix_settings.h"
 
-#ifndef FILE_H
-#define	FILE_H
+#pragma once
 
 namespace miosix {
 
@@ -40,18 +40,64 @@ class FilesystemBase;
 class StringPart;
 
 /**
+ * Return value of FileBase::getFileFromMemory()
+ * For filesystems whose backing storage is memory-mapped and additionally for
+ * files that are stored as a contiguous block, allow access to the underlying
+ * storage. Mostly used for execute-in-place of processes.
+ */
+struct MemoryMappedFile
+{
+    /**
+     * Constructor
+     * \param data pointer to first byte of file content
+     * \param size file size in bytes
+     */
+    MemoryMappedFile(const void *data, unsigned int size) : data(data), size(size) {}
+
+    /**
+     * \return true if the object refers to a valid file
+     */
+    bool isValid() const { return data!=nullptr && size>0; }
+
+    const void *data;  ///< Pointer to first byte of file content
+    unsigned int size; ///< File size in bytes
+};
+
+/**
  * The unix file abstraction. Also some device drivers are seen as files.
  * Classes of this type are reference counted, must be allocated on the heap
  * and managed through intrusive_ref_ptr<FileBase>
  */
-class FileBase : public IntrusiveRefCounted
+class FileBase : public IntrusiveRefCounted<FileBase>
 {
 public:
+    FileBase(const FileBase&)=delete;
+    FileBase& operator=(const FileBase&)=delete;
+
     /**
      * Constructor
      * \param parent the filesystem to which this file belongs
+     * \param flags file open flags
      */
-    FileBase(intrusive_ref_ptr<FilesystemBase> parent);
+    FileBase(intrusive_ref_ptr<FilesystemBase> parent, int flags)
+    #ifdef WITH_FILESYSTEM
+    ;
+    #else //WITH_FILESYSTEM
+    {
+        (void)parent;
+        (void)flags;
+    }
+    #endif //WITH_FILESYSTEM
+
+    /**
+     * File destructor
+     */
+    virtual ~FileBase()
+    #ifdef WITH_FILESYSTEM
+    ;
+    #else //WITH_FILESYSTEM
+    {}
+    #endif //WITH_FILESYSTEM
     
     /**
      * Write data to the file, if the file supports writing.
@@ -83,6 +129,13 @@ public:
      */
     virtual off_t lseek(off_t pos, int whence)=0;
     
+    /**
+     * Truncate the file
+     * \param size new file size
+     * \return 0 on success, or a negative number on failure
+     */
+    virtual int ftruncate(off_t size)=0;
+
     /**
      * Return file information.
      * \param pstat pointer to stat struct
@@ -123,25 +176,31 @@ public:
      * failure.
      */
     virtual int getdents(void *dp, int len);
-    
+
+    /**
+     * For filesystems whose backing storage is memory-mapped and additionally
+     * for files that are stored as a contiguous block, allow access to the
+     * underlying storage. Mostly used for execute-in-place of processes.
+     *
+     * \return information about the in-memory storage of the file, or return
+     * {nullptr,0} if this feature is not supported.
+     */
+    virtual MemoryMappedFile getFileFromMemory();
+
     /**
      * \return a pointer to the parent filesystem
      */
     const intrusive_ref_ptr<FilesystemBase> getParent() const { return parent; }
     
-    #endif //WITH_FILESYSTEM
-    
-    /**
-     * File destructor
-     */
-    virtual ~FileBase();
-    
 private:
-    FileBase(const FileBase&);
-    FileBase& operator=(const FileBase&);
-    
     intrusive_ref_ptr<FilesystemBase> parent; ///< Files may have a parent fs
+
+protected:
+    int flags; ///< File open flags (O_RDONLY, O_WRONLY, ...)
+    #endif //WITH_FILESYSTEM
 };
+
+#ifdef WITH_FILESYSTEM
 
 /**
  * Directories are a special kind of files that implement the getdents() call
@@ -155,7 +214,7 @@ public:
      * Constructor
      * \param parent the filesystem to which this file belongs
      */
-    DirectoryBase(intrusive_ref_ptr<FilesystemBase> parent) : FileBase(parent) {}
+    DirectoryBase(intrusive_ref_ptr<FilesystemBase> parent) : FileBase(parent,O_RDONLY) {}
     
     /**
      * Write data to the file, if the file supports writing.
@@ -184,6 +243,13 @@ public:
      * completed, or a negative number in case of errors
      */
     virtual off_t lseek(off_t pos, int whence);
+
+    /**
+     * Truncate the file
+     * \param size new file size
+     * \return 0 on success, or a negative number on failure
+     */
+    virtual int ftruncate(off_t size);
     
     /**
      * Return file information.
@@ -203,8 +269,7 @@ protected:
      * \param name file name to append after the DirentHeader
      * \return the number of bytes written or -1 on failure (no space in buffer)
      */
-    static int addEntry(char **pos, char *end, int ino, char type,
-            const StringPart& n);
+    static int addEntry(char **pos, char *end, int ino, char type, const char *n);
     
     /**
      * Helper function to add the default directory entries . and .. to a buffer
@@ -226,6 +291,14 @@ protected:
      * \return the number of bytes written or -1 on failure (no space in buffer)
      */
     static int addTerminatingEntry(char **pos, char *end);
+
+    /**
+     * Convert an st_mode as found in a struct stat to a d_type as found in a
+     * struct dirent
+     * \param mode file mode (st_mode encoding)
+     * \return file type (d_type encoding)
+     */
+    static unsigned char modeToType(unsigned short mode);
     
     ///Size of struct dirent excluding d_name. That is, the size of d_ino,
     ///d_off, d_reclen and d_type.  Notice that there are 4 bytes of padding
@@ -247,8 +320,7 @@ protected:
  * counted, must be allocated on the heap and managed through
  * intrusive_ref_ptr<FilesystemBase>
  */
-class FilesystemBase : public IntrusiveRefCounted,
-        public IntrusiveRefCountedSharedFromThis<FilesystemBase>
+class FilesystemBase : public IntrusiveRefCounted<FilesystemBase>
 {
 public:
     /**
@@ -276,6 +348,14 @@ public:
      * \return 0 on success, or a negative number on failure
      */
     virtual int lstat(StringPart& name, struct stat *pstat)=0;
+
+    /**
+     * Change file size
+     * \param name path name, relative to the local filesystem
+     * \param size new file size
+     * \return 0 on success, or a negative number on failure
+     */
+    virtual int truncate(StringPart& name, off_t size)=0;
     
     /**
      * Remove a file or directory
@@ -353,6 +433,11 @@ public:
     void setParentFsMountpointInode(int inode) { parentFsMountpointInode=inode; }
     
     /**
+     * \return the inode of the directory in the parent fs
+     */
+    int getParentFsMountpointInode() const { return parentFsMountpointInode; }
+
+    /**
      * \return filesystem id
      */
     short int getFsId() const { return filesystemId; }
@@ -374,6 +459,13 @@ private:
     volatile int openFileCount; ///< Number of open files
 };
 
-} //namespace miosix
+#else //WITH_FILESYSTEM
 
-#endif //FILE_H
+/**
+ * Stub version of FilesystemBase in case the kernel is built without filesystem
+ */
+class FilesystemBase : public IntrusiveRefCounted<FilesystemBase> {};
+
+#endif //WITH_FILESYSTEM
+
+} //namespace miosix

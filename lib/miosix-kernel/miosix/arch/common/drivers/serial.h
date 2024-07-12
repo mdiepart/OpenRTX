@@ -7,12 +7,14 @@
    || defined(_ARCH_CORTEXM4_STM32F4) || defined(_ARCH_CORTEXM3_STM32F2) \
    || defined(_ARCH_CORTEXM3_STM32L1) || defined(_ARCH_CORTEXM7_STM32F7) \
    || defined(_ARCH_CORTEXM7_STM32H7) || defined(_ARCH_CORTEXM4_STM32F3) \
-   || defined(_ARCH_CORTEXM4_STM32L4)
+   || defined(_ARCH_CORTEXM4_STM32L4) || defined(_ARCH_CORTEXM0PLUS_STM32L0)
 #include "serial_stm32.h"
-#elif defined(_ARCH_CORTEXM3_EFM32GG)
-#include "serial_efm32.h"
+#elif defined(_ARCH_CORTEXM3_EFM32GG) || defined(_ARCH_CORTEXM3_EFM32G)
+#include "efm32_serial.h"
 #elif defined(_ARCH_CORTEXM4_ATSAM4L)
 #include "serial_atsam4l.h"
+#elif defined(_ARCH_CORTEXM0PLUS_RP2040)
+#include "rp2040_serial.h"
 #else
 #error "Unknown arch"
 #endif

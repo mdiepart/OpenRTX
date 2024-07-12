@@ -47,12 +47,13 @@ const unsigned int MAIN_STACK_SIZE=4*1024;
 /// Serial port
 //This board only exposes USART1, without flow control
 const unsigned int defaultSerialSpeed=115200;
-// #define SERIAL_1_DMA //TODO: serial port DMA
+// #define SERIAL_1_DMA
 // #define SERIAL_2_DMA
 // #define SERIAL_3_DMA
 
 //SD card driver
 static const unsigned char sdVoltage=33; //Board powered @ 3.3V
+#define SD_SDMMC 1 //Select either SDMMC1 or SDMMC2
 #define SD_ONE_BIT_DATABUS //For now we'll use 1 bit bus
 
 /**

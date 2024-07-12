@@ -35,6 +35,7 @@
 #include <cstring>
 #include <string>
 #include <cstdio>
+#include <memory>
 #include "filesystem/stringpart.h"
 #include "filesystem/ioctl.h"
 #include "util/unicode.h"
@@ -60,7 +61,7 @@ static int translateError(int ec)
         case FR_NO_PATH:
             return -ENOENT;
         case FR_DENIED:
-            return -ENOSPC;
+            return -EINVAL;
         case FR_EXIST:
             return -EEXIST;
         case FR_WRITE_PROTECTED:
@@ -152,8 +153,7 @@ int Fat32Directory::getdents(void *dp, int len)
     {
         unfinished=false;
         char type=fi.fattrib & AM_DIR ? DT_DIR : DT_REG;
-        StringPart name(fi.lfname);
-        if(addEntry(&buffer,end,fi.inode,type,name)<0) return -EINVAL;
+        if(addEntry(&buffer,end,fi.inode,type,fi.lfname)<0) return -EINVAL;
     }
     for(;;)
     {
@@ -163,9 +163,9 @@ int Fat32Directory::getdents(void *dp, int len)
             addTerminatingEntry(&buffer,end);
             return buffer-begin;
         }
+        if(fi.fattrib & AM_VOL) continue; // Ignore volume labels
         char type=fi.fattrib & AM_DIR ? DT_DIR : DT_REG;
-        StringPart name(fi.lfname);
-        if(addEntry(&buffer,end,fi.inode,type,name)<0)
+        if(addEntry(&buffer,end,fi.inode,type,fi.lfname)<0)
         {
             unfinished=true;
             return buffer-begin;
@@ -188,8 +188,9 @@ public:
     /**
      * Constructor
      * \param parent the filesystem to which this file belongs
+     * \param flags file open flags
      */
-    Fat32File(intrusive_ref_ptr<FilesystemBase> parent, FastMutex& mutex);
+    Fat32File(intrusive_ref_ptr<FilesystemBase> parent, int flags, FastMutex& mutex);
     
     /**
      * Write data to the file, if the file supports writing.
@@ -218,6 +219,13 @@ public:
      * completed, or a negative number in case of errors
      */
     virtual off_t lseek(off_t pos, int whence);
+
+    /**
+     * Truncate the file
+     * \param size new file size
+     * \return 0 on success, or a negative number on failure
+     */
+    virtual int ftruncate(off_t size);
     
     /**
      * Return file information.
@@ -252,20 +260,45 @@ public:
 private:
     FIL file;
     FastMutex& mutex;
-    int inode;
+    int inode=0;
+    /// Used to map FatFs behavior into POSIX. Variable is 0 as long as we seek
+    /// within, contains by how many bytes we seeked past the end otherwise
+    off_t seekPastEnd=0;
 };
 
 //
 // class Fat32File
 //
 
-Fat32File::Fat32File(intrusive_ref_ptr<FilesystemBase> parent, FastMutex& mutex)
-        : FileBase(parent), mutex(mutex), inode(0) {}
+Fat32File::Fat32File(intrusive_ref_ptr<FilesystemBase> parent, int flags, FastMutex& mutex)
+        : FileBase(parent,flags), mutex(mutex) {}
 
 ssize_t Fat32File::write(const void *data, size_t len)
 {
     Lock<FastMutex> l(mutex);
     unsigned int bytesWritten;
+    //NOTE: if we lseek'd past the end, we f_lseek'd to the end and seekPastEnd
+    //is >0. We need to handle this special case by filling the gap with zeros
+    //Note that in this case write should not return the number of bytes written
+    //to fill the gap
+    if(seekPastEnd>0)
+    {
+        //If filling the gap would overflow we should not even start
+        if(seekPastEnd+static_cast<off_t>(f_size(&file))+len>0xffffffff)
+            return -EOVERFLOW;
+        //To write zeros efficiently we have to allocate a buffer of zeros
+        unsigned int bufSize=min<unsigned int>(seekPastEnd,FATFS_EXTEND_BUFFER);
+        unique_ptr<char,decltype(&free)> buffer(
+            reinterpret_cast<char*>(calloc(1,bufSize)),&free);
+        if(buffer.get()==nullptr) return -ENOMEM; //Not enough memory
+        while(seekPastEnd>0)
+        {
+            unsigned int toWrite=min<unsigned int>(seekPastEnd,bufSize);
+            int res=translateError(f_write(&file,buffer.get(),toWrite,&bytesWritten));
+            if(res || bytesWritten==0) return res; //Error while filling the gap
+            seekPastEnd-=bytesWritten;
+        }
+    }
     if(int res=translateError(f_write(&file,data,len,&bytesWritten))) return res;
     #ifdef SYNC_AFTER_WRITE
     if(f_sync(&file)!=FR_OK) return -EIO;
@@ -277,6 +310,9 @@ ssize_t Fat32File::read(void *data, size_t len)
 {
     Lock<FastMutex> l(mutex);
     unsigned int bytesRead;
+    //NOTE: if we lseek'd past the end, we f_lseek'd to the end and seekPastEnd
+    //is >0. Either reading at the end or past the end shall return 0 (eof), so
+    //there's no need to handle the read past the end case specially
     if(int res=translateError(f_read(&file,data,len,&bytesRead))) return res;
     return static_cast<int>(bytesRead);
 }
@@ -284,26 +320,64 @@ ssize_t Fat32File::read(void *data, size_t len)
 off_t Fat32File::lseek(off_t pos, int whence)
 {
     Lock<FastMutex> l(mutex);
-    off_t offset;
+    off_t offset, fileSize=static_cast<off_t>(f_size(&file));
     switch(whence)
     {
         case SEEK_CUR:
-            offset=static_cast<off_t>(f_tell(&file))+pos;
+            offset=static_cast<off_t>(f_tell(&file))+seekPastEnd+pos;
             break;
         case SEEK_SET:
             offset=pos;
             break;
         case SEEK_END:
-            offset=static_cast<off_t>(f_size(&file))+pos;
+            offset=fileSize+pos;
             break;
         default:
             return -EINVAL;
     }
-    //We don't support seek past EOF for Fat32
-    if(offset<0 || offset>static_cast<off_t>(f_size(&file))) return -EOVERFLOW;
+    if(offset<0) return -EOVERFLOW;
+    //Checks passed, now we do the actual seek
+    if(offset>fileSize)
+    {
+        //We can't f_lseek past the end of the file as FatFs deviates from POSIX.
+        //f_lseek would preallocate seekPastEnd bytes immediately, leaving them
+        //uninitialized, while POSIX specifies that no data should be added to
+        //the file unless an actual write occurs at the past the end location,
+        //and that the gap should be filled with zeros. For this reason, we seek
+        //at the end instead, and remember by how many bytes we are past the end
+        //in the seekPastEnd variable
+        seekPastEnd=offset-fileSize;
+        offset=fileSize;
+    } else seekPastEnd=0;
     if(int result=translateError(
         f_lseek(&file,static_cast<unsigned long>(offset)))) return result;
-    return offset;
+    return offset+seekPastEnd;
+}
+
+int Fat32File::ftruncate(off_t size)
+{
+    Lock<FastMutex> l(mutex);
+    off_t fileSize=static_cast<off_t>(f_size(&file));
+    if(size==fileSize) return 0; //Nothing to do
+    off_t curPos=static_cast<off_t>(f_tell(&file))+seekPastEnd;
+
+    int result=0;
+    if(size<fileSize)
+    {
+        //Shrinking, FatFs f_truncate truncates to the current file position
+        int r=translateError(f_lseek(&file,static_cast<unsigned long>(size)));
+        if(r) return r;
+        result=translateError(f_truncate(&file));
+    } else {
+        //Enlarging, can't use f_truncate so seek past the end an write
+        off_t r=lseek(size,SEEK_SET);
+        if(r<0) return r;
+        result=write(nullptr,0);
+    }
+    //Restore previous file position and return
+    off_t r=lseek(curPos,SEEK_SET);
+    if(r<0) return r;
+    return result;
 }
 
 int Fat32File::fstat(struct stat *pstat) const
@@ -375,7 +449,7 @@ int Fat32Fs::open(intrusive_ref_ptr<FileBase>& file, StringPart& name,
         else if(flags & _FCREAT) openflags|=FA_OPEN_ALWAYS;//If !exists create
         else openflags|=FA_OPEN_EXISTING;//If not exists fail
 
-        intrusive_ref_ptr<Fat32File> f(new Fat32File(shared_from_this(),mutex));
+        intrusive_ref_ptr<Fat32File> f(new Fat32File(shared_from_this(),flags-1,mutex));
         Lock<FastMutex> l(mutex);
         if(int res=translateError(f_open(&filesystem,f->fil(),name.c_str(),openflags)))
             return res;
@@ -386,9 +460,6 @@ int Fat32Fs::open(intrusive_ref_ptr<FileBase>& file, StringPart& name,
         }
         f->setInode(st.st_ino);
 
-        //Can't open files larger than INT_MAX
-        if(static_cast<int>(f_size(f->fil()))<0) return -EOVERFLOW;
-
         #ifdef SYNC_AFTER_WRITE
         if(f_sync(f->fil())!=FR_OK) return -EFAULT;
         #endif //SYNC_AFTER_WRITE
@@ -398,7 +469,6 @@ int Fat32Fs::open(intrusive_ref_ptr<FileBase>& file, StringPart& name,
             if(f_lseek(f->fil(),f_size(f->fil()))!=FR_OK) return -EFAULT;
 
         file=f;
-        return 0;
     } else {
         //About to open a directory
         if(flags & (_FWRITE | _FAPPEND | _FCREAT | _FTRUNC)) return -EISDIR;
@@ -424,9 +494,9 @@ int Fat32Fs::open(intrusive_ref_ptr<FileBase>& file, StringPart& name,
         if(int res=translateError(f_opendir(&filesystem,d->directory(),name.c_str())))
             return res;
          
-         file=d;
-         return 0;
+        file=d;
     }
+    return 0;
 }
 
 int Fat32Fs::lstat(StringPart& name, struct stat *pstat)
@@ -458,6 +528,14 @@ int Fat32Fs::lstat(StringPart& name, struct stat *pstat)
     pstat->st_size=info.fsize;
     pstat->st_blocks=(info.fsize+511)/512;
     return 0;
+}
+
+int Fat32Fs::truncate(StringPart& name, off_t size)
+{
+    //FatFs does not have a truncate, so we need to open the file and ftruncate
+    intrusive_ref_ptr<FileBase> file;
+    if(int result=open(file,name,O_WRONLY,0)) return result;
+    return file->ftruncate(size);
 }
 
 int Fat32Fs::unlink(StringPart& name)

@@ -111,10 +111,7 @@ public:
      * its running status. For example when a thread become sleeping, waiting,
      * deleted or if it exits the sleeping or waiting status
      */
-    static void IRQwaitStatusHook(Thread* t)
-    {
-        (void)t;
-    }
+    static void IRQwaitStatusHook(Thread* t) { (void)t; }
 
     /**
      * \internal

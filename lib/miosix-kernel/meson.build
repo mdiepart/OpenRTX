@@ -31,7 +31,7 @@ miosix_stm32f4_inc = miosix_inc + ['lib/miosix-kernel/miosix/arch/cortexM4_stm32
                                           'lib/miosix-kernel/miosix/arch/cortexM4_stm32f4/common/interfaces-impl']
 miosix_stm32f4_src = miosix_src + ['lib/miosix-kernel/miosix/arch/cortexM4_stm32f4/common/interfaces-impl/portability.cpp',
                                'lib/miosix-kernel/miosix/arch/common/core/interrupts_cortexMx.cpp',
-                                'lib/miosix-kernel/miosix/arch/common/core/stm32f2_f4_l4_f7_h7_os_timer.cpp']
+                                'lib/miosix-kernel/miosix/arch/common/core/stm32_32bit_os_timer.cpp']
 miosix_stm32f4_def = miosix_def + {'_ARCH_CORTEXM4_STM32F4' : ''}
 
 ##

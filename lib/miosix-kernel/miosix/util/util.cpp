@@ -41,7 +41,7 @@ using namespace std;
 namespace miosix {
 
 //
-// MemoryStatists class
+// MemoryProfiling class
 //
 
 void MemoryProfiling::print()
@@ -69,15 +69,15 @@ void MemoryProfiling::print()
 
 unsigned int MemoryProfiling::getStackSize()
 {
-    return miosix::Thread::getStackSize();
+    return Thread::getStackSize();
 }
 
 unsigned int MemoryProfiling::getAbsoluteFreeStack()
 {
-    const unsigned int *walk=miosix::Thread::getStackBottom();
-    const unsigned int stackSize=miosix::Thread::getStackSize();
+    const unsigned int *walk=Thread::getStackBottom();
+    const unsigned int stackSize=Thread::getStackSize();
     unsigned int count=0;
-    while(count<stackSize && *walk==miosix::STACK_FILL)
+    while(count<stackSize && *walk==STACK_FILL)
     {
         //Count unused stack
         walk++;
@@ -94,7 +94,7 @@ unsigned int MemoryProfiling::getAbsoluteFreeStack()
 unsigned int MemoryProfiling::getCurrentFreeStack()
 {
     register int *stack_ptr asm("sp");
-    const unsigned int *walk=miosix::Thread::getStackBottom();
+    const unsigned int *walk=Thread::getStackBottom();
     unsigned int freeStack=(reinterpret_cast<unsigned int>(stack_ptr)
                           - reinterpret_cast<unsigned int>(walk));
     //This takes into account CTXSAVE_ON_STACK.
@@ -106,9 +106,9 @@ unsigned int MemoryProfiling::getHeapSize()
 {
     //These extern variables are defined in the linker script
     //Pointer to begin of heap
-    extern const char _end asm("_end");
+    extern char _end asm("_end");
     //Pointer to end of heap
-    extern const char _heap_end asm("_heap_end");
+    extern char _heap_end asm("_heap_end");
 
     return reinterpret_cast<unsigned int>(&_heap_end)
          - reinterpret_cast<unsigned int>(&_end);
@@ -118,7 +118,7 @@ unsigned int MemoryProfiling::getAbsoluteFreeHeap()
 {
     //This extern variable is defined in the linker script
     //Pointer to end of heap
-    extern const char _heap_end asm("_heap_end");
+    extern char _heap_end asm("_heap_end");
 
     unsigned int maxHeap=getMaxHeap();
 
@@ -169,7 +169,7 @@ static void printSingleThreadInfo(Thread *self, Thread *thread,
 {
     long long threadDt = newTime - oldTime;
     int perc = static_cast<int>(threadDt >> 16) * 100 / approxDt;
-    iprintf("%p %10lld ns (%2d.%1d%%)", static_cast<void*>(thread), threadDt, perc / 10, perc % 10);
+    iprintf("%p %10lld ns (%2d.%1d%%)", thread, threadDt, perc / 10, perc % 10);
     if(isIdleThread)
     {
         iprintf(" (idle)");
@@ -214,7 +214,7 @@ void CPUProfiler::print()
         // Skip old threads that were killed
         while(newIt->thread != oldIt->thread)
         {
-            iprintf("%p killed\n", static_cast<void*>(oldIt->thread));
+            iprintf("%p killed\n", oldIt->thread);
             oldIt++;
         }
         // Found a thread that exists in both lists
@@ -227,7 +227,7 @@ void CPUProfiler::print()
     // Skip last killed threads
     while(oldIt != oldInfo.end())
     {
-        iprintf("%p killed\n", static_cast<void*>(oldIt->thread));
+        iprintf("%p killed\n", oldIt->thread);
         isIdleThread = false;
         oldIt++;
     }

@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2013 by Terraneo Federico                               *
+ *   Copyright (C) 2013-2024 by Terraneo Federico                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -36,19 +36,25 @@ using namespace std;
 
 namespace miosix {
 
-//This is a static assert. The filesystem code assumes off_t is 64bit.
-typedef char check_sizeof_off_t[sizeof(off_t)==8 ? 1 : -1];
+//The filesystem code assumes off_t is 64bit.
+static_assert(sizeof(off_t)==8,"");
 
 //
 // class FileBase
 //
 
-FileBase::FileBase(intrusive_ref_ptr<FilesystemBase> parent) : parent(parent)
+#ifdef WITH_FILESYSTEM
+
+FileBase::FileBase(intrusive_ref_ptr<FilesystemBase> parent, int flags)
+        : parent(parent), flags(flags)
 {
     if(parent) parent->newFileOpened();
 }
 
-#ifdef WITH_FILESYSTEM
+FileBase::~FileBase()
+{
+    if(parent) parent->fileCloseHook();
+}
 
 int FileBase::isatty() const
 {
@@ -57,9 +63,12 @@ int FileBase::isatty() const
 
 int FileBase::fcntl(int cmd, int opt)
 {
-    //Newlib makes some calls to fcntl, for example in opendir(). CLOEXEC isn't
-    //supported, but for now we lie and return 0
-    if(cmd==F_SETFD && (opt==FD_CLOEXEC || opt==0)) return 0;
+    switch(cmd)
+    {
+        case F_GETFD:
+        case F_GETFL: //TODO: also return file access mode
+            return flags;
+    }
     return -EBADF;
 }
 
@@ -73,11 +82,9 @@ int FileBase::getdents(void *dp, int len)
     return -EBADF;
 }
 
-#endif //WITH_FILESYSTEM
-
-FileBase::~FileBase()
+MemoryMappedFile FileBase::getFileFromMemory()
 {
-    if(parent) parent->fileCloseHook();
+    return MemoryMappedFile(nullptr,0); //Not supported
 }
 
 //
@@ -99,15 +106,19 @@ off_t DirectoryBase::lseek(off_t pos, int whence)
     return -EBADF;
 }
 
+int DirectoryBase::ftruncate(off_t size)
+{
+    return -EBADF;
+}
+
 int DirectoryBase::fstat(struct stat *pstat) const
 {
     return -EBADF;
 }
 
-int DirectoryBase::addEntry(char **pos, char *end, int ino, char type,
-        const StringPart& n)
+int DirectoryBase::addEntry(char **pos, char *end, int ino, char type, const char *n)
 {
-    int reclen=direntHeaderSizeNoPadding+n.length()+1;
+    int reclen=direntHeaderSizeNoPadding+strlen(n)+1;
     reclen=(reclen+3) & ~0x3; //Align to 4 bytes
     if(reclen>end-*pos) return -1;
     
@@ -116,7 +127,7 @@ int DirectoryBase::addEntry(char **pos, char *end, int ino, char type,
     data->d_off=0;
     data->d_reclen=reclen;
     data->d_type=type;
-    strcpy(data->d_name,n.c_str());
+    strcpy(data->d_name,n);
     
     (*pos)+=reclen;
     return reclen;
@@ -153,16 +164,27 @@ int DirectoryBase::addTerminatingEntry(char **pos, char *end)
     return direntHeaderSize;
 }
 
+unsigned char DirectoryBase::modeToType(unsigned short mode)
+{
+    switch(mode & S_IFMT)
+    {
+        case S_IFREG: return DT_REG;
+        case S_IFLNK: return DT_LNK;
+        case S_IFDIR: return DT_DIR;
+        case S_IFIFO: return DT_FIFO;
+        case S_IFCHR: return DT_CHR;
+        case S_IFBLK: return DT_BLK;
+        case S_IFSOCK: return DT_SOCK;
+        default: return DT_UNKNOWN;
+    }
+}
+
 //
 // class FilesystemBase
 //
 
 FilesystemBase::FilesystemBase() :
-#ifdef WITH_FILESYSTEM
-        filesystemId(FilesystemManager::getFilesystemId()), 
-#else //WITH_FILESYSTEM
-        filesystemId(0),
-#endif //WITH_FILESYSTEM
+        filesystemId(FilesystemManager::getFilesystemId()),
         parentFsMountpointInode(1), openFileCount(0) {}
 
 int FilesystemBase::readlink(StringPart& name, string& target)
@@ -185,5 +207,7 @@ void FilesystemBase::fileCloseHook()
 }
 
 FilesystemBase::~FilesystemBase() {}
+
+#endif //WITH_FILESYSTEM
 
 } //namespace miosix

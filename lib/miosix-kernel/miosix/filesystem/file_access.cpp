@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2013 by Terraneo Federico                               *
+ *   Copyright (C) 2013-2024 by Terraneo Federico                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -31,7 +31,10 @@
 #include <fcntl.h>
 #include "console/console_device.h"
 #include "mountpointfs/mountpointfs.h"
+#include "filesystem/romfs/romfs.h"
 #include "fat32/fat32.h"
+#include "littlefs/lfs_miosix.h"
+#include "pipe/pipe.h"
 #include "kernel/logging.h"
 #ifdef WITH_PROCESSES
 #include "kernel/process.h"
@@ -82,57 +85,72 @@ FileDescriptorTable::FileDescriptorTable()
 }
 
 FileDescriptorTable::FileDescriptorTable(const FileDescriptorTable& rhs)
-    : mutex(FastMutex::RECURSIVE), cwd(rhs.cwd)
+    : mutex(FastMutex::RECURSIVE)
 {
-    //No need to lock the mutex since we are in a constructor and there can't
+    //No need to lock this->mutex since we are in a constructor and there can't
     //be pointers to this in other threads yet
-    for(int i=0;i<MAX_OPEN_FILES;i++) this->files[i]=atomic_load(&rhs.files[i]);
+    {
+        Lock<FastMutex> l(rhs.mutex);
+        cwd=rhs.cwd;
+        for(int i=0;i<MAX_OPEN_FILES;i++)
+            if(rhs.filesCloexec[i]==false)
+                this->files[i]=atomic_load(rhs.files+i);
+    }
     FilesystemManager::instance().addFileDescriptorTable(this);
-}
-
-FileDescriptorTable& FileDescriptorTable::operator=(
-        const FileDescriptorTable& rhs)
-{
-    Lock<FastMutex> l(mutex);
-    for(int i=0;i<MAX_OPEN_FILES;i++)
-        atomic_store(&this->files[i],atomic_load(&rhs.files[i]));
-    return *this;
 }
 
 int FileDescriptorTable::open(const char* name, int flags, int mode)
 {
-    if(name==0 || name[0]=='\0') return -EFAULT;
+    if(name==nullptr || name[0]=='\0') return -EFAULT;
     Lock<FastMutex> l(mutex);
-    for(int i=3;i<MAX_OPEN_FILES;i++)
-    {
-        if(files[i]) continue;
-        //Found an empty file descriptor
-        string path=absolutePath(name);
-        if(path.empty()) return -ENAMETOOLONG;
-        ResolvedPath openData=FilesystemManager::instance().resolvePath(path);
-        if(openData.result<0) return openData.result;
-        StringPart sp(path,string::npos,openData.off);
-        int result=openData.fs->open(files[i],sp,flags,mode);
-        if(result==0) return i; //The file descriptor
-        else return result; //The error code
-    }
-    return -ENFILE;
+    int fd=getAvailableFd();
+    if(fd<0) return fd;
+    //Found an empty file descriptor
+    filesCloexec[fd]=(flags & O_CLOEXEC)!=0;
+    string path=absolutePath(name);
+    if(path.empty()) return -ENAMETOOLONG;
+    ResolvedPath openData=FilesystemManager::instance().resolvePath(path);
+    if(openData.result<0) return openData.result;
+    StringPart sp(path,string::npos,openData.off);
+    int result=openData.fs->open(files[fd],sp,flags,mode);
+    if(result==0) return fd; //The file descriptor
+    else return result; //The error code
 }
 
 int FileDescriptorTable::close(int fd)
 {
     //No need to lock the mutex when deleting
     if(fd<0 || fd>=MAX_OPEN_FILES) return -EBADF;
-    intrusive_ref_ptr<FileBase> toClose;
-    toClose=atomic_exchange(files+fd,intrusive_ref_ptr<FileBase>());
+    auto toClose=atomic_exchange(files+fd,intrusive_ref_ptr<FileBase>());
     if(!toClose) return -EBADF; //File entry was not open
     return 0;
+}
+
+void FileDescriptorTable::cloexec()
+{
+    Lock<FastMutex> l(mutex);
+    for(int i=0;i<MAX_OPEN_FILES;i++)
+        if(filesCloexec[i])
+            atomic_exchange(files+i,intrusive_ref_ptr<FileBase>());
 }
 
 void FileDescriptorTable::closeAll()
 {
     for(int i=0;i<MAX_OPEN_FILES;i++)
         atomic_exchange(files+i,intrusive_ref_ptr<FileBase>());
+}
+
+int FileDescriptorTable::fcntl(int fd, int cmd, int opt)
+{
+    intrusive_ref_ptr<FileBase> file=getFile(fd);
+    if(!file) return -EBADF;
+    //Handle CLOEXEC as it'a a property of the file descriptor, not the file
+    if(cmd==F_SETFD && (opt==FD_CLOEXEC || opt==0))
+    {
+        Lock<FastMutex> l(mutex);
+        filesCloexec[fd]= opt==FD_CLOEXEC;
+        return 0;
+    } else return file->fcntl(cmd,opt);
 }
 
 int FileDescriptorTable::getcwd(char *buf, size_t len)
@@ -166,9 +184,11 @@ int FileDescriptorTable::chdir(const char* name)
     ResolvedPath openData=FilesystemManager::instance().resolvePath(newCwd);
     if(openData.result<0) return openData.result;
     struct stat st;
-    StringPart sp(newCwd,string::npos,openData.off);
-    if(int result=openData.fs->lstat(sp,&st)) return result;
-    if(!S_ISDIR(st.st_mode)) return -ENOTDIR;
+    {
+        StringPart sp(newCwd,string::npos,openData.off);
+        if(int result=openData.fs->lstat(sp,&st)) return result;
+        if(!S_ISDIR(st.st_mode)) return -ENOTDIR;
+    }
     //NOTE: put after resolvePath() as it strips trailing /
     //Also put after lstat() as it fails if path has a trailing slash
     newCwd+='/';
@@ -206,6 +226,33 @@ int FileDescriptorTable::unlink(const char *name)
     return FilesystemManager::instance().unlinkHelper(path);
 }
 
+ssize_t FileDescriptorTable::readlink(const char *name, char *buf, size_t size)
+{
+    if(name==nullptr || name[0]=='\0' || buf==nullptr) return -EFAULT;
+    string path=absolutePath(name);
+    if(path.empty()) return -ENAMETOOLONG;
+    ResolvedPath openData=FilesystemManager::instance().resolvePath(path,false);
+    if(openData.result<0) return openData.result;
+    StringPart sp(path,string::npos,openData.off);
+    string target;
+    if(int result=openData.fs->readlink(sp,target)<0) return result;
+    int result=min(size,target.size());
+    memcpy(buf,target.data(),result);
+    return result;
+}
+
+int FileDescriptorTable::truncate(const char *name, off_t size)
+{
+    if(size<0) return -EINVAL;
+    if(name==nullptr || name[0]=='\0') return -EFAULT;
+    string path=absolutePath(name);
+    if(path.empty()) return -ENAMETOOLONG;
+    ResolvedPath openData=FilesystemManager::instance().resolvePath(path);
+    if(openData.result<0) return openData.result;
+    StringPart sp(path,string::npos,openData.off);
+    return openData.fs->truncate(sp,size);
+}
+
 int FileDescriptorTable::rename(const char *oldName, const char *newName)
 {
     if(oldName==0 || oldName[0]=='\0') return -EFAULT;
@@ -216,20 +263,61 @@ int FileDescriptorTable::rename(const char *oldName, const char *newName)
     return FilesystemManager::instance().renameHelper(oldPath,newPath);
 }
 
+int FileDescriptorTable::dup(int fd)
+{
+    if(fd<0 || fd>=MAX_OPEN_FILES) return -EBADF;
+    auto file=atomic_load(files+fd);
+    if(!file) return -EBADF;
+    Lock<FastMutex> l(mutex);
+    int newFd=getAvailableFd();
+    if(newFd<0) return newFd;
+    files[newFd]=file; //files[newFd] is guaranteed empty, assignment enough
+    filesCloexec[newFd]=false;
+    return newFd;
+}
+
+int FileDescriptorTable::dup2(int oldFd, int newFd)
+{
+    if(oldFd<0 || oldFd>=MAX_OPEN_FILES) return -EBADF;
+    if(newFd<0 || newFd>=MAX_OPEN_FILES) return -EBADF;
+    if(oldFd==newFd) return newFd;
+    auto file=atomic_load(files+oldFd);
+    if(!file) return -EBADF;
+    //Need to lock on writes so as not to race with getAvailableFd() elsewhere
+    Lock<FastMutex> l(mutex);
+    atomic_store(files+newFd,file); //May race with concurrent close, need atomic
+    filesCloexec[newFd]=false;
+    return newFd;
+}
+
+int FileDescriptorTable::pipe(int fds[2])
+{
+    if(fds==nullptr) return -EFAULT;
+    Lock<FastMutex> l(mutex);
+    int availableFds=0;
+    for(int i=0;i<MAX_OPEN_FILES;i++)
+    {
+        if(!files[i])
+        {
+            fds[availableFds]=i;
+            if(++availableFds>=2) break;
+        }
+    }
+    if(availableFds<2) return -EMFILE;
+    intrusive_ref_ptr<FileBase> pipe(new Pipe);
+    files[fds[0]]=pipe;
+    files[fds[1]]=pipe;
+    filesCloexec[fds[0]]=false;
+    filesCloexec[fds[1]]=false;
+    return 0;
+}
+
 int FileDescriptorTable::statImpl(const char* name, struct stat* pstat, bool f)
 {
     if(name==0 || name[0]=='\0' || pstat==0) return -EFAULT;
     string path=absolutePath(name);
     if(path.empty()) return -ENAMETOOLONG;
     return FilesystemManager::instance().statHelper(path,pstat,f);
-}
-
-FileDescriptorTable::~FileDescriptorTable()
-{
-    FilesystemManager::instance().removeFileDescriptorTable(this);
-    //There's no need to lock the mutex and explicitly close files eventually
-    //left open, because if there are other threads accessing this while we are
-    //being deleted we have bigger problems anyway
 }
 
 string FileDescriptorTable::absolutePath(const char* path)
@@ -240,6 +328,20 @@ string FileDescriptorTable::absolutePath(const char* path)
     Lock<FastMutex> l(mutex);
     if(len+cwd.length()>PATH_MAX) return "";
     return cwd+path;
+}
+
+FileDescriptorTable::~FileDescriptorTable()
+{
+    FilesystemManager::instance().removeFileDescriptorTable(this);
+    //There's no need to lock the mutex and explicitly close files eventually
+    //left open, because if there are other threads accessing this while we are
+    //being deleted we have bigger problems anyway
+}
+
+int FileDescriptorTable::getAvailableFd()
+{
+    for(int i=0;i<MAX_OPEN_FILES;i++) if(!files[i]) return i;
+    return -EMFILE;
 }
 
 /**
@@ -692,6 +794,51 @@ short int FilesystemManager::getFilesystemId()
 
 int FilesystemManager::devCount=1;
 
+/**
+ * \brief Try to mount a filesystem in "/sd"
+ * \tparam T type of filesystem to mount
+ * \param dev Reference to the device to mount
+ * \param rootFs Reference to root file system
+ * \param devfs Reference to devfs
+ * \return `true` if mount was successful, `false` otherwise
+ */
+template <class T>
+#ifdef WITH_DEVFS
+static inline bool tryMount(const char *name, intrusive_ref_ptr<Device> dev,
+    intrusive_ref_ptr<FilesystemBase> rootFs, intrusive_ref_ptr<DevFs> devfs)
+#else
+static inline bool tryMount(const char *name, intrusive_ref_ptr<Device> dev,
+    intrusive_ref_ptr<FilesystemBase> rootFs)
+#endif
+{
+    bootlog("Mounting %s as /sd ... ",name);
+    intrusive_ref_ptr<FileBase> disk;
+    FilesystemManager& fsm=FilesystemManager::instance();
+
+    #ifdef WITH_DEVFS
+    if(dev) devfs->addDevice("sda", dev);
+    StringPart sda("sda");
+    if(devfs->open(disk, sda, O_RDWR, 0) < 0)
+    #else // WITH_DEVFS
+    if(dev && dev->open(disk,intrusive_ref_ptr<FilesystemBase>(0),O_RDWR,0)<0)
+    #endif // WITH_DEVFS
+    {
+        bootlog("Failed\n");
+        return false;
+    }
+
+    intrusive_ref_ptr<T> fsImpl(new T(disk));
+    if(fsImpl->mountFailed()) { bootlog("Failed\n"); return false; }
+    StringPart sd("sd");
+    if(rootFs->mkdir(sd, 0755)!=0 || fsm.kmount("/sd", fsImpl)!=0)
+    {
+        bootlog("Failed\n");
+        return false;
+    }
+    bootlog("Ok\n");
+    return true;
+}
+
 #ifdef WITH_DEVFS
 intrusive_ref_ptr<DevFs> //return value is a pointer to DevFs
 #else //WITH_DEVFS
@@ -707,7 +854,7 @@ basicFilesystemSetup(intrusive_ref_ptr<Device> dev)
     #ifdef WITH_DEVFS
     bootlog("Mounting DevFs as /dev ... ");
     StringPart sp("dev");
-    int r1=rootFs->mkdir(sp,0755); 
+    int r1=rootFs->mkdir(sp,0755);
     intrusive_ref_ptr<DevFs> devfs(new DevFs);
     int r2=fsm.kmount("/dev",devfs);
     bool devFsOk=(r1==0 && r2==0);
@@ -715,36 +862,45 @@ basicFilesystemSetup(intrusive_ref_ptr<Device> dev)
     if(!devFsOk) return devfs;
     fsm.setDevFs(devfs);
     #endif //WITH_DEVFS
-    
-    bootlog("Mounting Fat32Fs as /sd ... ");
-    bool fat32failed=false;
-    intrusive_ref_ptr<FileBase> disk;
-    #ifdef WITH_DEVFS
-    if(dev) devfs->addDevice("sda",dev);
-    StringPart sda("sda");
-    if(devfs->open(disk,sda,O_RDWR,0)<0) fat32failed=true;
-    #else //WITH_DEVFS
-    if(dev && dev->open(disk,intrusive_ref_ptr<FilesystemBase>(0),O_RDWR,0)<0)
-        fat32failed=true;
-    #endif //WITH_DEVFS
-    
-    intrusive_ref_ptr<Fat32Fs> fat32;
-    if(fat32failed==false)
+
+    #ifdef WITH_ROMFS
     {
-        fat32=new Fat32Fs(disk);
-        if(fat32->mountFailed()) fat32failed=true;
+        bootlog("Mounting RomFs as /bin ... ");
+        StringPart sp("bin");
+        bool ok=false;
+        if(rootFs->mkdir(sp,0755)==0)
+        {
+            const void *base=getRomFsAddressAfterKernel();
+            if(base)
+            {
+                intrusive_ref_ptr<MemoryMappedRomFs> bin(new MemoryMappedRomFs(base));
+                if(!bin->mountFailed())
+                    if(fsm.kmount("/bin",bin)==0) ok=true;
+            }
+        }
+        bootlog(ok ? "Ok\n" : "Failed\n");
     }
-    if(fat32failed==false)
+    #endif //WITH_ROMFS
+
+    if(dev)
     {
-        StringPart sd("sd");
-        fat32failed=rootFs->mkdir(sd,0755)!=0;
-        fat32failed=fsm.kmount("/sd",fat32)!=0;
+        #ifdef WITH_DEVFS
+        #define TRY_MOUNT(x) if (tryMount<x>(#x, dev, rootFs, devfs)) return devfs
+        #else
+        #define TRY_MOUNT(x) if (tryMount<x>(#x, dev, rootFs)) return
+        #endif
+        #ifdef WITH_FATFS
+        TRY_MOUNT(Fat32Fs);
+        #endif
+        #ifdef WITH_LITTLEFS
+        TRY_MOUNT(LittleFS);
+        #endif
+        #undef TRY_MOUNT
     }
-    bootlog(fat32failed==0 ? "Ok\n" : "Failed\n");
     
     #ifdef WITH_DEVFS
     return devfs;
-    #endif //WITH_DEVFS
+    #endif
 }
 
 FileDescriptorTable& getFileDescriptorTable()

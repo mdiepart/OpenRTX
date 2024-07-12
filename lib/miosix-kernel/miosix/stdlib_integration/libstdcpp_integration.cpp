@@ -78,22 +78,8 @@ void operator delete(void *p) noexcept
     free(p);
 }
 
-void operator delete(void *p, std::size_t s) noexcept
-{
-    (void)s;
-
-    free(p);
-}
-
 void operator delete[](void *p) noexcept
 {
-    free(p);
-}
-
-void operator delete[](void *p, std::size_t s) noexcept
-{
-    (void)s;
-    
     free(p);
 }
 

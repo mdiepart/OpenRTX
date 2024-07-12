@@ -27,7 +27,6 @@
 
 #include "sync.h"
 #include "kernel.h"
-#include "kernel/scheduler/scheduler.h"
 #include "error.h"
 #include "pthread_private.h"
 #include <algorithm>
@@ -46,6 +45,22 @@ static auto PKlowerPriority=[](Thread *lhs, Thread *rhs)
 {
     return lhs->PKgetPriority().mutexLessOp(rhs->PKgetPriority());
 };
+
+//
+// class FastMutex
+//
+
+FastMutex::FastMutex(Options opt)
+{
+    if(opt==RECURSIVE)
+    {
+        pthread_mutexattr_t temp;
+        pthread_mutexattr_init(&temp);
+        pthread_mutexattr_settype(&temp,PTHREAD_MUTEX_RECURSIVE);
+        pthread_mutex_init(&impl,&temp);
+        pthread_mutexattr_destroy(&temp);
+    } else pthread_mutex_init(&impl,nullptr);
+}
 
 //
 // class Mutex
@@ -163,7 +178,7 @@ void Mutex::PKlockToDepth(PauseKernelLock& dLock, unsigned int depth)
 bool Mutex::PKtryLock(PauseKernelLock& dLock)
 {
     (void)dLock;
-
+    
     Thread *p=Thread::PKgetCurrentThread();
     if(owner==nullptr)
     {
@@ -266,7 +281,7 @@ bool Mutex::PKunlock(PauseKernelLock& dLock)
 unsigned int Mutex::PKunlockAllDepthLevels(PauseKernelLock& dLock)
 {
     (void)dLock;
-    
+
     Thread *p=Thread::PKgetCurrentThread();
     if(owner!=p) return 0;
 
@@ -444,14 +459,14 @@ Thread *Semaphore::IRQsignalNoPreempt()
     return t;
 }
 
-void Semaphore::IRQsignal()
+void Semaphore::IRQsignal(bool& hppw)
 {
     //Update the state of the FIFO and the counter
     Thread *t=IRQsignalNoPreempt();
     if(t==nullptr) return;
     //If the woken thread has higher priority trigger a reschedule
     if(Thread::IRQgetCurrentThread()->IRQgetPriority()<t->IRQgetPriority())
-        Scheduler::IRQfindNextThread();
+        hppw=true;
 }
 
 void Semaphore::signal()

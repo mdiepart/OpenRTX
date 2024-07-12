@@ -132,33 +132,25 @@ public:
      * \return the syscall id, used to identify individual system calls
      */
     int getSyscallId() const;
-    
+
     /**
-     * \return the first syscall parameter. The returned result is meaningful
-     * only if the syscall (identified through its id) has one or more parameters
+     * \param index 0=first syscall parameter, 1=second syscall parameter, ...
+     * The maximum number of syscall parameters is architecture dependent
+     * \return the syscall parameter. The returned result is meaningful
+     * only if the syscall (identified through its id) has the requested parameter
      */
-    unsigned int getFirstParameter() const;
-    
-    /**
-     * \return the second syscall parameter. The returned result is meaningful
-     * only if the syscall (identified through its id) has two or more parameters
-     */
-    unsigned int getSecondParameter() const;
-    
-    /**
-     * \return the third syscall parameter. The returned result is meaningful
-     * only if the syscall (identified through its id) has three parameters
-     */
-    unsigned int getThirdParameter() const;
+    unsigned int getParameter(unsigned int index) const;
     
     /**
      * Set the value that will be returned by the syscall.
-     * Invalidates parameters so must be called only after the syscall
-     * parameteres have been read.
-     * \param ret value that will be returned by the syscall.
+     * Invalidates the corresponding parameter so must be called only after the
+     * syscall parameteres have been read.
+     * \param index 0=first syscall parameter, 1=second syscall parameter, ...
+     * The maximum number of syscall parameters is architecture dependent
+     * \param value value that will be returned by the syscall.
      */
-    void setReturnValue(unsigned int ret);
-    
+    void setParameter(unsigned int index, unsigned int value);
+
 private:
     unsigned int *registers;
 };
@@ -207,17 +199,23 @@ private:
  * It is used by the kernel, and should not be used by end users.
  * \param ctxsave a pointer to a field ctxsave inside a Thread class that need
  * to be filled
- * \param pc starting program counter of newly created thread, used to
- * initialize ctxsave
- * \param sp starting stack pointer of newly created thread, used to initialize
- * ctxsave
- * \param argv starting data passed to newly created thread, used to initialize
- * ctxsave
+ * \param pc starting program counter of newly created thread
+ * \param sp starting stack pointer of newly created thread
+ * \param argc number of arguments passed to main
+ * \param argvSp pointer to argument array. Since the args block is stored
+ * above the stack and this is the pointer into the first byte of the args
+ * block, this pointer doubles as the initial stack pointer when the process
+ * is started.
+ * \param envp pointer to environment variables
  * \param gotBase base address of the global offset table, for userspace
  * processes
+ * \param heapEnd when creating the main thread in a process, pass the pointer
+ * to the end of the heap area. When creating additional threads in the process,
+ * this value is irrelevant. In Miosix sbrk is not a syscall for processes as
+ * the memory area allocated to a process is fixed at process creation
  */
-void initCtxsave(unsigned int *ctxsave, void *(*pc)(void *), unsigned int *sp,
-        void *argv, unsigned int *gotBase);
+void initCtxsave(unsigned int *ctxsave, void *(*pc)(void *), int argc,
+        void *argvSp, void *envp, unsigned int *gotBase, unsigned int *heapEnd);
 
 /**
  * \internal

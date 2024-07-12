@@ -1100,23 +1100,26 @@ private:
      * Create a thread to be used inside a process. The thread is created in
      * WAIT status, a wakeup() on it is required to actually start it.
      * \param startfunc entry point
-     * \param argv parameter to be passed to the entry point
-     * \param options thread options
      * \param proc process to which this thread belongs
      */
-    static Thread *createUserspace(void *(*startfunc)(void *),
-        void *argv, unsigned short options, Process *proc);
+    static Thread *createUserspace(void *(*startfunc)(void *), Process *proc);
     
     /**
      * Setup the userspace context of the thread, so that it can be later
      * switched to userspace. Must be called only once for each thread instance
      * \param entry userspace entry point
+     * \param argc number of arguments
+     * \param argvSp pointer to arguments array. Since the args block is stored
+     * above the stack and this is the pointer into the first byte of the args
+     * block, this pointer doubles as the initial stack pointer when the process
+     * is started.
+     * \param envp pointer to environment variables
      * \param gotBase base address of the GOT, also corresponding to the start
      * of the RAM image of the process
-     * \param ramImageSize size of the process ram image
+     * \param stackSize size of the userspace stack, used for bound checking
      */
-    static void setupUserspaceContext(unsigned int entry, unsigned int *gotBase,
-        unsigned int ramImageSize);
+    static void setupUserspaceContext(unsigned int entry, int argc, void *argvSp,
+        void *envp, unsigned int *gotBase, unsigned int stackSize);
     
     #endif //WITH_PROCESSES
 
@@ -1215,12 +1218,14 @@ private:
     struct _reent *cReentrancyData;
     CppReentrancyData cppReentrancyData;
     #ifdef WITH_PROCESSES
-    ///Process to which this thread belongs. Null if it is a kernel thread.
+    ///Process to which this thread belongs. Kernel threads point to a special
+    ///ProcessBase that represents the kernel.
     ProcessBase *proc;
     ///Pointer to the set of saved registers for when the thread is running in
     ///user mode. For kernel threads (i.e, threads where proc==kernel) this
     ///pointer is null
     unsigned int *userCtxsave;
+    unsigned int *userWatermark;
     #endif //WITH_PROCESSES
     #ifdef WITH_CPU_TIME_COUNTER
     CPUTimeCounterPrivateThreadData timeCounterData;
@@ -1245,7 +1250,7 @@ private:
     //Needs access to cppReent
     friend class CppReentrancyAccessor;
     #ifdef WITH_PROCESSES
-    //Needs PKcreateUserspace(), setupUserspaceContext(), switchToUserspace()
+    //Needs createUserspace(), setupUserspaceContext(), switchToUserspace()
     friend class Process;
     #endif //WITH_PROCESSES
     #ifdef WITH_CPU_TIME_COUNTER

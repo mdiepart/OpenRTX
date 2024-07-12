@@ -86,7 +86,7 @@ void ISR_yield()
     if(SCB->SHCSR & (1<<13))
     {
         if(miosix::Thread::IRQreportFault(miosix_private::FaultData(
-            MP,0,0)))
+            fault::MP,0,0)))
         {
             SCB->SHCSR &= ~(1<<13); //Clear MEMFAULTPENDED bit
             return;
@@ -102,7 +102,7 @@ void ISR_yield()
     //at this time we do not know if the active context is user or kernel
     unsigned int threadSp=ctxsave[0];
     unsigned int *processStack=reinterpret_cast<unsigned int*>(threadSp);
-    if(processStack[3]!=miosix::SYS_YIELD)
+    if(processStack[3]!=static_cast<unsigned int>(miosix::Syscall::YIELD))
         miosix::Thread::IRQhandleSvc(processStack[3]);
     else miosix::Scheduler::IRQfindNextThread();
     #else //WITH_PROCESSES
@@ -142,6 +142,7 @@ void initCtxsave(unsigned int *ctxsave, void *(*pc)(void *), unsigned int *sp,
 
 void FaultData::print() const
 {
+    using namespace fault;
     switch(id)
     {
         case MP:
@@ -181,28 +182,32 @@ void FaultData::print() const
             iprintf("* Busfault @ 0x%x (PC was 0x%x)\n",arg,pc);
             break;
         case BF_NOADDR:
-            iprintf("*Busfault (PC was 0x%x)\n",pc);
+            iprintf("* Busfault (PC was 0x%x)\n",pc);
+            break;
+        case STACKOVERFLOW:
+            iprintf("* Stack overflow\n");
             break;
     }
 }
 
-void initCtxsave(unsigned int *ctxsave, void *(*pc)(void *), unsigned int *sp,
-        void *argv, unsigned int *gotBase)
+void initCtxsave(unsigned int *ctxsave, void *(*pc)(void *), int argc,
+    void *argvSp, void *envp, unsigned int *gotBase, unsigned int *heapEnd)
 {
-    unsigned int *stackPtr=sp;
+    unsigned int *stackPtr=reinterpret_cast<unsigned int*>(argvSp);
     stackPtr--; //Stack is full descending, so decrement first
     *stackPtr=0x01000000; stackPtr--;                                 //--> xPSR
     *stackPtr=reinterpret_cast<unsigned long>(pc); stackPtr--;        //--> pc
     *stackPtr=0xffffffff; stackPtr--;                                 //--> lr
     *stackPtr=0; stackPtr--;                                          //--> r12
-    *stackPtr=0; stackPtr--;                                          //--> r3
-    *stackPtr=0; stackPtr--;                                          //--> r2
-    *stackPtr=0; stackPtr--;                                          //--> r1
-    *stackPtr=reinterpret_cast<unsigned long >(argv);                 //--> r0
+    *stackPtr=reinterpret_cast<unsigned long>(heapEnd); stackPtr--;   //--> r3
+    *stackPtr=reinterpret_cast<unsigned long>(envp);    stackPtr--;   //--> r2
+    *stackPtr=reinterpret_cast<unsigned long>(argvSp);  stackPtr--;   //--> r1
+    *stackPtr=argc;                                                   //--> r0
 
     ctxsave[0]=reinterpret_cast<unsigned long>(stackPtr);             //--> psp
-    ctxsave[6]=reinterpret_cast<unsigned long>(gotBase);              //--> r9                                               //--> r9
+    ctxsave[6]=reinterpret_cast<unsigned long>(gotBase);              //--> r9
     //leaving the content of r4-r8,r10-r11 uninitialized
+    //NOTE: Cortex M3 differs from Cortex M4/M7 as ctxsave does not contain lr
 }
 
 #endif //WITH_PROCESSES

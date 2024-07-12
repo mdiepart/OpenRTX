@@ -38,6 +38,22 @@
 using namespace std;
 using namespace miosix;
 
+//Work around ST renaming register fields for some STM32L4
+#if defined(USART_CR1_RXNEIE_RXFNEIE) && !defined(USART_CR1_RXNEIE)
+#define USART_CR1_RXNEIE    USART_CR1_RXNEIE_RXFNEIE
+#endif
+#if defined(USART_ISR_RXNE_RXFNE) && !defined(USART_ISR_RXNE)
+#define USART_ISR_RXNE      USART_ISR_RXNE_RXFNE
+#endif
+#if defined(USART_ISR_TXE_TXFNF) && !defined(USART_ISR_TXE)
+#define USART_ISR_TXE       USART_ISR_TXE_TXFNF
+#endif
+
+#ifdef STM32F030x8
+// On this chip only USART1 exists
+#define STM32_NO_SERIAL_2_3
+#endif
+
 static const int numPorts=3; //Supporting only USART1, USART2, USART3
 
 //A nice feature of the stm32 is that the USART are connected to the same
@@ -141,11 +157,16 @@ void __attribute__((noinline)) usart1txDmaImpl()
      || defined(_ARCH_CORTEXM4_STM32L4)
     DMA1->IFCR=DMA_IFCR_CGIF4;
     DMA1_Channel4->CCR=0; //Disable DMA
+    #elif defined(_ARCH_CORTEXM7_STM32H7) //stm32f2 and f4
+    DMA1->HIFCR = DMA_HIFCR_CTCIF7
+                | DMA_HIFCR_CTEIF7
+                | DMA_HIFCR_CDMEIF7
+                | DMA_HIFCR_CFEIF7;
     #else //stm32f2 and f4
-    DMA2->HIFCR=DMA_HIFCR_CTCIF7
-              | DMA_HIFCR_CTEIF7
-              | DMA_HIFCR_CDMEIF7
-              | DMA_HIFCR_CFEIF7;
+    DMA2->HIFCR = DMA_HIFCR_CTCIF7
+                | DMA_HIFCR_CTEIF7
+                | DMA_HIFCR_CDMEIF7
+                | DMA_HIFCR_CFEIF7;
     #endif
     if(ports[0]) ports[0]->IRQhandleDMAtx();
 }
@@ -174,6 +195,28 @@ void __attribute__((naked)) DMA1_Channel4_IRQHandler()
  * \internal DMA1 Channel 5 IRQ (configured as USART1 RX)
  */
 void __attribute__((naked)) DMA1_Channel5_IRQHandler()
+{
+    saveContext();
+    asm volatile("bl _Z15usart1rxDmaImplv");
+    restoreContext();
+}
+
+#elif defined(_ARCH_CORTEXM7_STM32H7)
+
+/**
+ * \internal DMA1 stream 7 IRQ (configured as USART1 TX)
+ */
+void __attribute__((naked)) DMA1_Stream7_IRQHandler()
+{
+    saveContext();
+    asm volatile("bl _Z15usart1txDmaImplv");
+    restoreContext();
+}
+
+/**
+ * \internal DMA1 stream 5 IRQ (configured as USART1 RX)
+ */
+void __attribute__((naked)) DMA1_Stream5_IRQHandler()
 {
     saveContext();
     asm volatile("bl _Z15usart1rxDmaImplv");
@@ -216,10 +259,10 @@ void __attribute__((noinline)) usart2txDmaImpl()
     DMA1->IFCR=DMA_IFCR_CGIF7;
     DMA1_Channel7->CCR=0; //Disable DMA
     #else //stm32f2 and f4
-    DMA1->HIFCR=DMA_HIFCR_CTCIF6
-              | DMA_HIFCR_CTEIF6
-              | DMA_HIFCR_CDMEIF6
-              | DMA_HIFCR_CFEIF6;
+    DMA1->HIFCR = DMA_HIFCR_CTCIF6
+                | DMA_HIFCR_CTEIF6
+                | DMA_HIFCR_CDMEIF6
+                | DMA_HIFCR_CFEIF6;
     #endif
     if(ports[1]) ports[1]->IRQhandleDMAtx();
 }
@@ -248,6 +291,28 @@ void __attribute__((naked)) DMA1_Channel7_IRQHandler()
  * \internal DMA1 Channel 6 IRQ (configured as USART2 RX)
  */
 void __attribute__((naked)) DMA1_Channel6_IRQHandler()
+{
+    saveContext();
+    asm volatile("bl _Z15usart2rxDmaImplv");
+    restoreContext();
+}
+
+#elif defined(_ARCH_CORTEXM7_STM32H7)
+
+/**
+ * \internal DMA1 stream 6 IRQ (configured as USART2 TX)
+ */
+void __attribute__((naked)) DMA1_Stream6_IRQHandler()
+{
+    saveContext();
+    asm volatile("bl _Z15usart2txDmaImplv");
+    restoreContext();
+}
+
+/**
+ * \internal DMA1 stream 4 IRQ (configured as USART2 RX)
+ */
+void __attribute__((naked)) DMA1_Stream4_IRQHandler()
 {
     saveContext();
     asm volatile("bl _Z15usart2rxDmaImplv");
@@ -290,10 +355,10 @@ void __attribute__((noinline)) usart3txDmaImpl()
     DMA1->IFCR=DMA_IFCR_CGIF2;
     DMA1_Channel2->CCR=0; //Disable DMA
     #else //stm32f2 and f4
-    DMA1->LIFCR=DMA_LIFCR_CTCIF3
-              | DMA_LIFCR_CTEIF3
-              | DMA_LIFCR_CDMEIF3
-              | DMA_LIFCR_CFEIF3;
+    DMA1->LIFCR = DMA_LIFCR_CTCIF3
+                | DMA_LIFCR_CTEIF3
+                | DMA_LIFCR_CDMEIF3
+                | DMA_LIFCR_CFEIF3;
     #endif
     if(ports[2]) ports[2]->IRQhandleDMAtx();
 }
@@ -385,71 +450,53 @@ STM32Serial::STM32Serial(int id, int baudrate, FlowCtrl flowControl)
         : Device(Device::TTY), rxQueue(rxQueueMin+baudrate/500),
           flowControl(flowControl==RTSCTS), portId(id)
 {
+    //stm32f1 alternate function mapping does not work like later stm32 chips,
+    //its only purpose is to change the GPIO pins allocated to a peripherals.
+    //There is no AF register per pin, but an AF register per peripheral
+    //with several mutually exclusive mapping options. 
+    //Therefore we don't need to configure AF on stm32f1 for the serial to work
     #if !defined(_ARCH_CORTEXM3_STM32F1)
-    //stm32f2, f4, l4, l1, f7, h7 require alternate function mapping
-    //stm32f0 family has different alternate function mapping
+    //stm32f2, f4, l4, l1, f7, h7, l0 require alternate function mapping
+    //stm32f0/l0 family has different alternate function mapping
     //with respect to the other families
+    #if defined(_ARCH_CORTEXM0_STM32F0)
+    int altFunc = 1; // F0 only
+    #elif defined(_ARCH_CORTEXM0PLUS_STM32L0)
+    int altFunc = 4; // L0 only
+    #else
+    int altFunc = 7; // everyone else
+    #endif
     switch(id)
     {
         case 1:
-            #if !defined(_ARCH_CORTEXM0_STM32F0)
-            u1tx::alternateFunction(7);
-            u1rx::alternateFunction(7);
+            u1tx::alternateFunction(altFunc);
+            u1rx::alternateFunction(altFunc);
             if(flowControl)
             {
-                u1rts::alternateFunction(7);
-                u1cts::alternateFunction(7);
+                u1rts::alternateFunction(altFunc);
+                u1cts::alternateFunction(altFunc);
             }
-            #else  //!defined(_ARCH_CORTEXM0_STM32F0)
-            u1tx::alternateFunction(1);
-            u1rx::alternateFunction(1);
-            if(flowControl)
-            {
-                u1rts::alternateFunction(1);
-                u1cts::alternateFunction(1);
-            }
-            #endif //!defined(_ARCH_CORTEXM0_STM32F0)
             break;
         case 2:
-            #if !defined(_ARCH_CORTEXM0_STM32F0)
-            u2tx::alternateFunction(7);
-            u2rx::alternateFunction(7);
+            u2tx::alternateFunction(altFunc);
+            u2rx::alternateFunction(altFunc);
             if(flowControl)
             {
-                u2rts::alternateFunction(7);
-                u2cts::alternateFunction(7);
+                u2rts::alternateFunction(altFunc);
+                u2cts::alternateFunction(altFunc);
             }
-            #else  //!defined(_ARCH_CORTEXM0_STM32F0)
-            u2tx::alternateFunction(1);
-            u2rx::alternateFunction(1);
-            if(flowControl)
-            {
-                u2rts::alternateFunction(1);
-                u2cts::alternateFunction(1);
-            }
-            #endif //!defined(_ARCH_CORTEXM0_STM32F0)            
             break;
         case 3:
-            #if !defined(_ARCH_CORTEXM0_STM32F0)
-            u3tx::alternateFunction(7);
-            u3rx::alternateFunction(7);
+            u3tx::alternateFunction(altFunc);
+            u3rx::alternateFunction(altFunc);
             if(flowControl)
             {
-                u3rts::alternateFunction(7);
-                u3cts::alternateFunction(7);
+                u3rts::alternateFunction(altFunc);
+                u3cts::alternateFunction(altFunc);
             }
-            #else  //!defined(_ARCH_CORTEXM0_STM32F0)
-            u3tx::alternateFunction(4);
-            u3rx::alternateFunction(4);
-            if(flowControl)
-            {
-                u3rts::alternateFunction(4);
-                u3cts::alternateFunction(4);
-            }
-            #endif //!defined(_ARCH_CORTEXM0_STM32F0)            
             break;
     }
-    #endif //_ARCH_CORTEXM3_STM32F1
+    #endif
     
     switch(id)
     {
@@ -496,17 +543,6 @@ void STM32Serial::commonInit(int id, int baudrate, GpioPin tx, GpioPin rx,
     if(id<1|| id>numPorts || ports[id-1]!=0) errorHandler(UNEXPECTED);
     ports[id-1]=this;
     unsigned int freq=SystemCoreClock;
-    //Quirk the position of the PPRE1 and PPRE2 bitfields in RCC->CFGR changes
-    //STM32F0 does not have ppre1 and ppre2, in this case the variables are not
-    //defined in order to avoid "unused variable" warning
-    #if defined(_ARCH_CORTEXM3_STM32F1)   || defined(_ARCH_CORTEXM3_STM32L1) \
-     || defined(_ARCH_CORTEXM4_STM32F3) || defined(_ARCH_CORTEXM4_STM32L4)
-    const unsigned int ppre1=8;
-    const unsigned int ppre2=11;
-    #elif !defined(_ARCH_CORTEXM7_STM32H7) && !defined(_ARCH_CORTEXM0_STM32F0)
-    const unsigned int ppre1=10;
-    const unsigned int ppre2=13;
-    #endif
     switch(id)
     {
         case 1:
@@ -532,6 +568,25 @@ void STM32Serial::commonInit(int id, int baudrate, GpioPin tx, GpioPin rx,
             NVIC_SetPriority(DMA1_Channel5_IRQn,14);
             NVIC_EnableIRQ(DMA1_Channel5_IRQn);
             dmaRx=DMA1_Channel5;
+            #elif defined(_ARCH_CORTEXM7_STM32H7) 
+            RCC->AHB1ENR |= RCC_AHB1ENR_DMA1EN; // enabling DMA1 clock
+            RCC_SYNC();
+            // enabling interrupts
+            dmaRx=DMA1_Stream5;
+            NVIC_EnableIRQ(DMA1_Stream5_IRQn);
+            NVIC_SetPriority(DMA1_Stream5_IRQn,14);
+            dmaTx=DMA1_Stream7;
+            NVIC_EnableIRQ(DMA1_Stream7_IRQn);
+            NVIC_SetPriority(DMA1_Stream7_IRQn,15);
+            // Configuring DMAMUX            
+            DMAMUX1_Channel5->CCR &= ~DMAMUX_CxCR_DMAREQ_ID;
+            DMAMUX1_Channel5->CCR |= DMAMUX_CxCR_DMAREQ_ID_0
+                                   | DMAMUX_CxCR_DMAREQ_ID_3
+                                   | DMAMUX_CxCR_DMAREQ_ID_5;
+            DMAMUX1_Channel7->CCR &= ~DMAMUX_CxCR_DMAREQ_ID;
+            DMAMUX1_Channel7->CCR |= DMAMUX_CxCR_DMAREQ_ID_1
+                                   | DMAMUX_CxCR_DMAREQ_ID_3
+                                   | DMAMUX_CxCR_DMAREQ_ID_5;
             #else //stm32f2, stm32f4
             RCC->AHB1ENR |= RCC_AHB1ENR_DMA2EN;
             RCC_SYNC();
@@ -549,10 +604,10 @@ void STM32Serial::commonInit(int id, int baudrate, GpioPin tx, GpioPin rx,
             NVIC_SetPriority(USART1_IRQn,15);//Lowest priority for serial
             NVIC_EnableIRQ(USART1_IRQn);
             #if !defined(_ARCH_CORTEXM7_STM32H7) && !defined(_ARCH_CORTEXM0_STM32F0)
-            if(RCC->CFGR & RCC_CFGR_PPRE2_2) freq/=1<<(((RCC->CFGR>>ppre2) & 0x3)+1);
+            if(RCC->CFGR & RCC_CFGR_PPRE2_2) freq/=1<<(((RCC->CFGR>>RCC_CFGR_PPRE2_Pos) & 0x3)+1);
             #elif defined(_ARCH_CORTEXM0_STM32F0)
             // STM32F0 family has only PPRE2 register
-            if(RCC->CFGR & RCC_CFGR_PPRE_2) freq/=1<<(((RCC->CFGR>>8) & 0x3)+1);
+            if(RCC->CFGR & RCC_CFGR_PPRE_2) freq/=1<<(((RCC->CFGR>>RCC_CFGR_PPRE_Pos) & 0x3)+1);
             #else
             //rcc_hclk3 = SystemCoreClock / HPRE
             //rcc_pclk2 = rcc_hclk1 / D2PPRE2
@@ -597,6 +652,26 @@ void STM32Serial::commonInit(int id, int baudrate, GpioPin tx, GpioPin rx,
             NVIC_SetPriority(DMA1_Channel6_IRQn,14);
             NVIC_EnableIRQ(DMA1_Channel6_IRQn);
             dmaRx=DMA1_Channel6;
+            #elif defined(_ARCH_CORTEXM7_STM32H7) 
+            RCC->AHB1ENR |= RCC_AHB1ENR_DMA1EN; // enabling DMA1 clock
+            RCC_SYNC();
+            // enabling interrupts
+            dmaRx=DMA1_Stream4;
+            NVIC_EnableIRQ(DMA1_Stream4_IRQn);
+            NVIC_SetPriority(DMA1_Stream4_IRQn,14);
+            dmaTx=DMA1_Stream6;
+            NVIC_EnableIRQ(DMA1_Stream6_IRQn);
+            NVIC_SetPriority(DMA1_Stream6_IRQn,15);
+            // Configuring DMAMUX            
+            DMAMUX1_Channel4->CCR &= ~DMAMUX_CxCR_DMAREQ_ID;
+            DMAMUX1_Channel4->CCR |= DMAMUX_CxCR_DMAREQ_ID_0
+                                   | DMAMUX_CxCR_DMAREQ_ID_1
+                                   | DMAMUX_CxCR_DMAREQ_ID_3
+                                   | DMAMUX_CxCR_DMAREQ_ID_5;
+            DMAMUX1_Channel6->CCR &= ~DMAMUX_CxCR_DMAREQ_ID;
+            DMAMUX1_Channel6->CCR |= DMAMUX_CxCR_DMAREQ_ID_2
+                                   | DMAMUX_CxCR_DMAREQ_ID_3
+                                   | DMAMUX_CxCR_DMAREQ_ID_5;
             #else //stm32f2, stm32f4
             RCC->AHB1ENR |= RCC_AHB1ENR_DMA1EN;
             RCC_SYNC();
@@ -614,10 +689,10 @@ void STM32Serial::commonInit(int id, int baudrate, GpioPin tx, GpioPin rx,
             NVIC_SetPriority(USART2_IRQn,15);//Lowest priority for serial
             NVIC_EnableIRQ(USART2_IRQn);
             #if !defined(_ARCH_CORTEXM7_STM32H7) && !defined(_ARCH_CORTEXM0_STM32F0)
-            if(RCC->CFGR & RCC_CFGR_PPRE1_2) freq/=1<<(((RCC->CFGR>>ppre1) & 0x3)+1);
+            if(RCC->CFGR & RCC_CFGR_PPRE1_2) freq/=1<<(((RCC->CFGR>>RCC_CFGR_PPRE1_Pos) & 0x3)+1);
             #elif defined(_ARCH_CORTEXM0_STM32F0)
             // STM32F0 family has only PPRE2 register
-            if(RCC->CFGR & RCC_CFGR_PPRE_2) freq/=1<<(((RCC->CFGR>>8) & 0x3)+1);
+            if(RCC->CFGR & RCC_CFGR_PPRE_2) freq/=1<<(((RCC->CFGR>>RCC_CFGR_PPRE_Pos) & 0x3)+1);
             #else //_ARCH_CORTEXM7_STM32H7
             //rcc_hclk3 = SystemCoreClock / HPRE
             //rcc_pclk1 = rcc_hclk1 / D2PPRE1
@@ -629,7 +704,7 @@ void STM32Serial::commonInit(int id, int baudrate, GpioPin tx, GpioPin rx,
                 freq/=1<<(((RCC->D2CFGR>>RCC_D2CFGR_D2PPRE1_Pos) & 0x3)+1);
             #endif //_ARCH_CORTEXM7_STM32H7
             break;
-        #if !defined(STM32F411xE) && !defined(STM32F401xE) && !defined(STM32F401xC)
+        #if !defined(STM32F411xE) && !defined(STM32F401xE) && !defined(STM32F401xC) && !defined(STM32L053xx)
         case 3:
             port=USART3;
             #ifndef _ARCH_CORTEXM7_STM32H7
@@ -661,6 +736,27 @@ void STM32Serial::commonInit(int id, int baudrate, GpioPin tx, GpioPin rx,
             NVIC_SetPriority(DMA1_Channel3_IRQn,14);
             NVIC_EnableIRQ(DMA1_Channel3_IRQn);
             dmaRx=DMA1_Channel3;
+            #elif defined(_ARCH_CORTEXM7_STM32H7) 
+            RCC->AHB1ENR |= RCC_AHB1ENR_DMA1EN; // enabling DMA1 clock
+            RCC_SYNC();
+            // enabling interrupts
+            dmaRx=DMA1_Stream1;
+            NVIC_EnableIRQ(DMA1_Stream1_IRQn);
+            NVIC_SetPriority(DMA1_Stream1_IRQn,14);
+            dmaTx=DMA1_Stream3;
+            NVIC_EnableIRQ(DMA1_Stream3_IRQn);
+            NVIC_SetPriority(DMA1_Stream3_IRQn,15);
+            // Configuring DMAMUX            
+            DMAMUX1_Channel1->CCR &= ~DMAMUX_CxCR_DMAREQ_ID;
+            DMAMUX1_Channel1->CCR |= DMAMUX_CxCR_DMAREQ_ID_0
+                                   | DMAMUX_CxCR_DMAREQ_ID_2
+                                   | DMAMUX_CxCR_DMAREQ_ID_3
+                                   | DMAMUX_CxCR_DMAREQ_ID_5;
+            DMAMUX1_Channel3->CCR &= ~DMAMUX_CxCR_DMAREQ_ID;
+            DMAMUX1_Channel3->CCR |= DMAMUX_CxCR_DMAREQ_ID_1
+                                   | DMAMUX_CxCR_DMAREQ_ID_2
+                                   | DMAMUX_CxCR_DMAREQ_ID_3
+                                   | DMAMUX_CxCR_DMAREQ_ID_5;
             #else //stm32f2, stm32f4
             RCC->AHB1ENR |= RCC_AHB1ENR_DMA1EN;
             RCC_SYNC();
@@ -675,7 +771,7 @@ void STM32Serial::commonInit(int id, int baudrate, GpioPin tx, GpioPin rx,
             #endif
             port->CR3=USART_CR3_DMAT | USART_CR3_DMAR;
             #endif //SERIAL_3_DMA
-            #if !defined(STM32F072xB)
+            #if !defined(STM32F072xB) && !defined(STM32L053xx)
             NVIC_SetPriority(USART3_IRQn,15);//Lowest priority for serial
             NVIC_EnableIRQ(USART3_IRQn);
             #else  //STM32F072xB
@@ -683,10 +779,10 @@ void STM32Serial::commonInit(int id, int baudrate, GpioPin tx, GpioPin rx,
             NVIC_EnableIRQ(USART3_4_IRQn);
             #endif //STM32F072xB
             #if !defined(_ARCH_CORTEXM7_STM32H7) && !defined(_ARCH_CORTEXM0_STM32F0)
-            if(RCC->CFGR & RCC_CFGR_PPRE1_2) freq/=1<<(((RCC->CFGR>>ppre1) & 0x3)+1);
+            if(RCC->CFGR & RCC_CFGR_PPRE1_2) freq/=1<<(((RCC->CFGR>>RCC_CFGR_PPRE1_Pos) & 0x3)+1);
             #elif defined(_ARCH_CORTEXM0_STM32F0)
             // STM32F0 family has only PPRE2 register
-            if(RCC->CFGR & RCC_CFGR_PPRE_2) freq/=1<<(((RCC->CFGR>>8) & 0x3)+1);
+            if(RCC->CFGR & RCC_CFGR_PPRE_2) freq/=1<<(((RCC->CFGR>>RCC_CFGR_PPRE_Pos) & 0x3)+1);
             #else //_ARCH_CORTEXM7_STM32H7
             //rcc_hclk3 = SystemCoreClock / HPRE
             //rcc_pclk1 = rcc_hclk1 / D2PPRE1
@@ -717,8 +813,13 @@ void STM32Serial::commonInit(int id, int baudrate, GpioPin tx, GpioPin rx,
     }
     const unsigned int quot=2*freq/baudrate; //2*freq for round to nearest
     port->BRR=quot/2 + (quot & 1);           //Round to nearest
+    //Quirk: some stm32 do not have onebit mode (stm32f101,f102,f103)
+    #ifdef USART_CR3_ONEBIT
     if(flowControl==false) port->CR3 |= USART_CR3_ONEBIT;
     else port->CR3 |= USART_CR3_ONEBIT | USART_CR3_RTSE | USART_CR3_CTSE;
+    #else
+    if(flowControl) port->CR3 |= USART_CR3_RTSE | USART_CR3_CTSE;
+    #endif
     //Enabled, 8 data bit, no parity, interrupt on character rx
     #ifdef SERIAL_DMA
     if(dmaTx)
@@ -802,16 +903,27 @@ ssize_t STM32Serial::writeBlock(const void *buffer, size_t size, off_t where)
             buf+=transferSize;
             remaining-=transferSize;
         }
+        #ifdef WITH_DEEP_SLEEP
+        //The serial driver by default can return even though the last part of
+        //the data is still being transmitted by the DMA. When using deep sleep
+        //however the DMA operation needs to be fully enclosed by a deep sleep
+        //lock to prevent the scheduler from stopping peripheral clocks.
+        waitDmaTxCompletion();
+        waitSerialTxFifoEmpty(); //TODO: optimize by doing it only when entering deep sleep
+        #endif //WITH_DEEP_SLEEP
         return size;
     }
     #endif //SERIAL_DMA
     for(size_t i=0;i<size;i++)
     {
         #if !defined(_ARCH_CORTEXM7_STM32F7) && !defined(_ARCH_CORTEXM7_STM32H7) \
-         && !defined(_ARCH_CORTEXM0_STM32F0)   && !defined(_ARCH_CORTEXM4_STM32F3) \
-         && !defined(_ARCH_CORTEXM4_STM32L4)
+         && !defined(_ARCH_CORTEXM0_STM32F0) && !defined(_ARCH_CORTEXM4_STM32F3) \
+         && !defined(_ARCH_CORTEXM4_STM32L4) && !defined(_ARCH_CORTEXM0PLUS_STM32L0)
         while((port->SR & USART_SR_TXE)==0) ;
         port->DR=*buf++;
+        #elif defined(_ARCH_CORTEXM7_STM32H7)
+        while((port->ISR & USART_ISR_TXE_TXFNF)==0) ;
+        port->TDR=*buf++;
         #else //_ARCH_CORTEXM7_STM32F7/H7
         while((port->ISR & USART_ISR_TXE)==0) ;
         port->TDR=*buf++;
@@ -839,7 +951,7 @@ void STM32Serial::IRQwrite(const char *str)
             (DMA_ISR_TCIF7 | DMA_ISR_TEIF7),
             (DMA_ISR_TCIF2 | DMA_ISR_TEIF2)
         };
-        #if defined(_ARCH_CORTEXM4_STM32F3) || defined(_ARCH_CORTEXM4_STM32L4)
+        #if !defined(_ARCH_CORTEXM3_STM32L1)
         // Workaround for ST messing up with flag definitions...
         constexpr unsigned int DMA_CCR4_EN = DMA_CCR_EN;
         #endif
@@ -853,10 +965,13 @@ void STM32Serial::IRQwrite(const char *str)
     while(*str)
     {
         #if !defined(_ARCH_CORTEXM7_STM32F7) && !defined(_ARCH_CORTEXM7_STM32H7) \
-         && !defined(_ARCH_CORTEXM0_STM32F0)   && !defined(_ARCH_CORTEXM4_STM32F3) \
-         && !defined(_ARCH_CORTEXM4_STM32L4)
+         && !defined(_ARCH_CORTEXM0_STM32F0) && !defined(_ARCH_CORTEXM4_STM32F3) \
+         && !defined(_ARCH_CORTEXM4_STM32L4) && !defined(_ARCH_CORTEXM0PLUS_STM32L0)
         while((port->SR & USART_SR_TXE)==0) ;
         port->DR=*str++;
+        #elif defined(_ARCH_CORTEXM7_STM32H7)
+        while((port->ISR & USART_ISR_TXE_TXFNF)==0) ;
+        port->TDR=*str++;
         #else //_ARCH_CORTEXM7_STM32F7/H7
         while((port->ISR & USART_ISR_TXE)==0) ;
         port->TDR=*str++;
@@ -896,8 +1011,13 @@ void STM32Serial::IRQhandleInterrupt()
 {
     #if !defined(_ARCH_CORTEXM7_STM32F7) && !defined(_ARCH_CORTEXM7_STM32H7) \
      && !defined(_ARCH_CORTEXM0_STM32F0)   && !defined(_ARCH_CORTEXM4_STM32F3) \
-     && !defined(_ARCH_CORTEXM4_STM32L4)
+     && !defined(_ARCH_CORTEXM4_STM32L4) && !defined(_ARCH_CORTEXM0PLUS_STM32L0)
     unsigned int status=port->SR;
+    #elif defined(_ARCH_CORTEXM7_STM32H7)
+    unsigned int status=port->ISR;
+    constexpr unsigned int USART_SR_RXNE=USART_ISR_RXNE_RXFNE;
+    constexpr unsigned int USART_SR_IDLE=USART_ISR_IDLE;
+    constexpr unsigned int USART_SR_FE  =USART_ISR_FE;
     #else //_ARCH_CORTEXM7_STM32F7/H7
     unsigned int status=port->ISR;
     constexpr unsigned int USART_SR_RXNE=USART_ISR_RXNE;
@@ -913,8 +1033,8 @@ void STM32Serial::IRQhandleInterrupt()
     {
         //Always read data, since this clears interrupt flags
         #if !defined(_ARCH_CORTEXM7_STM32F7) && !defined(_ARCH_CORTEXM7_STM32H7) \
-         && !defined(_ARCH_CORTEXM0_STM32F0)   && !defined(_ARCH_CORTEXM4_STM32F3) \
-         && !defined(_ARCH_CORTEXM4_STM32L4)
+         && !defined(_ARCH_CORTEXM0_STM32F0) && !defined(_ARCH_CORTEXM4_STM32F3) \
+         && !defined(_ARCH_CORTEXM4_STM32L4) && !defined(_ARCH_CORTEXM0PLUS_STM32L0)
         c=port->DR;
         #else //_ARCH_CORTEXM7_STM32F7/H7
         c=port->RDR;
@@ -927,8 +1047,8 @@ void STM32Serial::IRQhandleInterrupt()
     if(status & USART_SR_IDLE)
     {
         #if !defined(_ARCH_CORTEXM7_STM32F7) && !defined(_ARCH_CORTEXM7_STM32H7) \
-         && !defined(_ARCH_CORTEXM0_STM32F0)   && !defined(_ARCH_CORTEXM4_STM32F3) \
-         && !defined(_ARCH_CORTEXM4_STM32L4)
+         && !defined(_ARCH_CORTEXM0_STM32F0) && !defined(_ARCH_CORTEXM4_STM32F3) \
+         && !defined(_ARCH_CORTEXM4_STM32L4) && !defined(_ARCH_CORTEXM0PLUS_STM32L0)
         c=port->DR; //clears interrupt flags
         #else //_ARCH_CORTEXM7_STM32F7/H7
         port->ICR=USART_ICR_IDLECF; //clears interrupt flags
@@ -994,6 +1114,11 @@ STM32Serial::~STM32Serial()
                 NVIC_ClearPendingIRQ(DMA1_Channel4_IRQn);
                 NVIC_DisableIRQ(DMA1_Channel5_IRQn);
                 NVIC_ClearPendingIRQ(DMA1_Channel5_IRQn);
+                #elif defined(_ARCH_CORTEXM7_STM32H7)
+                NVIC_DisableIRQ(DMA1_Stream7_IRQn);
+                NVIC_ClearPendingIRQ(DMA1_Stream7_IRQn);
+                NVIC_DisableIRQ(DMA1_Stream5_IRQn);
+                NVIC_ClearPendingIRQ(DMA1_Stream5_IRQn);
                 #else //stm32f2, stm32f4
                 NVIC_DisableIRQ(DMA2_Stream7_IRQn);
                 NVIC_ClearPendingIRQ(DMA2_Stream7_IRQn);
@@ -1035,7 +1160,7 @@ STM32Serial::~STM32Serial()
                 RCC->APB1LENR &= ~RCC_APB1LENR_USART2EN;
                 #endif //_ARCH_CORTEXM7_STM32H7
                 break;
-            #if !defined(STM32F411xE) && !defined(STM32F401xE) && !defined(STM32F401xC)
+            #if !defined(STM32F411xE) && !defined(STM32F401xE) && !defined(STM32F401xC) && !defined(STM32L053xx)
             case 3:
                 #ifdef SERIAL_3_DMA
                 IRQdmaReadStop();
@@ -1098,7 +1223,7 @@ void STM32Serial::writeDma(const char *buffer, size_t size)
     markBufferBeforeDmaWrite(buffer,size);
     //Quirk: DMA messes up the TC bit, and causes waitSerialTxFifoEmpty() to
     //return prematurely, causing characters to be missed when rebooting
-    //immediatley a write. You can just clear the bit manually, but doing that
+    //immediately a write. You can just clear the bit manually, but doing that
     //is dangerous, as if you clear the bit but for any reason the serial
     //write doesn't start (think an invalid buffer, or another thread crashing),
     //then TC will never be set and waitSerialTxFifoEmpty() deadlocks!
@@ -1112,30 +1237,27 @@ void STM32Serial::writeDma(const char *buffer, size_t size)
      && !defined(_ARCH_CORTEXM0_STM32F0)   && !defined(_ARCH_CORTEXM4_STM32F3) \
      && !defined(_ARCH_CORTEXM4_STM32L4)
     while((port->SR & USART_SR_TXE)==0) ;
+    #elif defined(_ARCH_CORTEXM7_STM32H7)
+    while((port->ISR & USART_ISR_TXE_TXFNF)==0) ;
     #else //_ARCH_CORTEXM7_STM32F7/H7
     while((port->ISR & USART_ISR_TXE)==0) ;
     #endif //_ARCH_CORTEXM7_STM32F7/H7
     
     dmaTxInProgress=true;
+    #if defined(_ARCH_CORTEXM3_STM32F1) || defined(_ARCH_CORTEXM4_STM32F3) || \
+        defined(_ARCH_CORTEXM4_STM32L4)
     #if defined(_ARCH_CORTEXM3_STM32F1)
     dmaTx->CPAR=reinterpret_cast<unsigned int>(&port->DR);
-    dmaTx->CMAR=reinterpret_cast<unsigned int>(buffer);
-    dmaTx->CNDTR=size;
-    dmaTx->CCR=DMA_CCR4_MINC  //Increment RAM pointer
-             | DMA_CCR4_DIR   //Memory to peripheral
-             | DMA_CCR4_TEIE  //Interrupt on transfer error
-             | DMA_CCR4_TCIE  //Interrupt on transfer complete
-             | DMA_CCR4_EN;   //Start DMA
     #else
-    #if defined(_ARCH_CORTEXM4_STM32F3) || defined(_ARCH_CORTEXM4_STM32L4)
     dmaTx->CPAR=reinterpret_cast<unsigned int>(&port->TDR);
+    #endif
     dmaTx->CMAR=reinterpret_cast<unsigned int>(buffer);
     dmaTx->CNDTR=size;
-    dmaTx->CCR=DMA_CCR_MINC  //Increment RAM pointer
-             | DMA_CCR_DIR   //Memory to peripheral
-             | DMA_CCR_TEIE  //Interrupt on transfer error
-             | DMA_CCR_TCIE  //Interrupt on transfer complete
-             | DMA_CCR_EN;   //Start DMA
+    dmaTx->CCR = DMA_CCR_MINC  //Increment RAM pointer
+               | DMA_CCR_DIR   //Memory to peripheral
+               | DMA_CCR_TEIE  //Interrupt on transfer error
+               | DMA_CCR_TCIE  //Interrupt on transfer complete
+               | DMA_CCR_EN;   //Start DMA
     #else  //_ARCH_CORTEXM4_STM32F3
     #if !defined(_ARCH_CORTEXM7_STM32F7) && !defined(_ARCH_CORTEXM7_STM32H7) \
      && !defined(_ARCH_CORTEXM0_STM32F0)
@@ -1150,15 +1272,23 @@ void STM32Serial::writeDma(const char *buffer, size_t size)
     //transfer completes successfully even in the presence of this fifo
     //error
     dmaTx->FCR=DMA_SxFCR_DMDIS;//Enable fifo
-    dmaTx->CR=DMA_SxCR_CHSEL_2 //Select channel 4 (USART_TX)
-                   | DMA_SxCR_MINC    //Increment RAM pointer
-                   | DMA_SxCR_DIR_0   //Memory to peripheral
-                   | DMA_SxCR_TCIE    //Interrupt on completion
-                   | DMA_SxCR_TEIE    //Interrupt on transfer error
-                   | DMA_SxCR_DMEIE   //Interrupt on direct mode error
-                   | DMA_SxCR_EN;     //Start the DMA
+    #ifndef _ARCH_CORTEXM7_STM32H7
+    dmaTx->CR = DMA_SxCR_CHSEL_2 //Select channel 4 (USART_TX)
+              | DMA_SxCR_MINC    //Increment RAM pointer
+              | DMA_SxCR_DIR_0   //Memory to peripheral
+              | DMA_SxCR_TCIE    //Interrupt on completion
+              | DMA_SxCR_TEIE    //Interrupt on transfer error
+              | DMA_SxCR_DMEIE   //Interrupt on direct mode error
+              | DMA_SxCR_EN;     //Start the DMA
+    #else
+    dmaTx->CR = DMA_SxCR_MINC    //Increment RAM pointer
+              | DMA_SxCR_DIR_0   //Memory to peripheral
+              | DMA_SxCR_TCIE    //Interrupt on completion
+              | DMA_SxCR_TEIE    //Interrupt on transfer error
+              | DMA_SxCR_DMEIE   //Interrupt on direct mode error
+              | DMA_SxCR_EN;     //Start the DMA
+    #endif //_ARCH_CORTEXM7_STM32H7
     #endif //_ARCH_CORTEXM4_STM32F3
-    #endif //_ARCH_CORTEXM3_STM32F1
 }
 
 void STM32Serial::IRQreadDma()
@@ -1172,25 +1302,20 @@ void STM32Serial::IRQreadDma()
 
 void STM32Serial::IRQdmaReadStart()
 {
+    #if defined(_ARCH_CORTEXM3_STM32F1) || defined(_ARCH_CORTEXM4_STM32F3) || \
+        defined(_ARCH_CORTEXM4_STM32L4)
     #if defined(_ARCH_CORTEXM3_STM32F1)
     dmaRx->CPAR=reinterpret_cast<unsigned int>(&port->DR);
-    dmaRx->CMAR=reinterpret_cast<unsigned int>(rxBuffer);
-    dmaRx->CNDTR=rxQueueMin;
-    dmaRx->CCR=DMA_CCR4_MINC  //Increment RAM pointer
-             | 0              //Peripheral to memory
-             | DMA_CCR4_TEIE  //Interrupt on transfer error
-             | DMA_CCR4_TCIE  //Interrupt on transfer complete
-             | DMA_CCR4_EN;   //Start DMA
     #else
-    #if defined(_ARCH_CORTEXM4_STM32F3) || defined(_ARCH_CORTEXM4_STM32L4)
     dmaRx->CPAR=reinterpret_cast<unsigned int>(&port->RDR);
+    #endif
     dmaRx->CMAR=reinterpret_cast<unsigned int>(rxBuffer);
     dmaRx->CNDTR=rxQueueMin;
-    dmaRx->CCR=DMA_CCR_MINC  //Increment RAM pointer
-             | 0              //Peripheral to memory
-             | DMA_CCR_TEIE  //Interrupt on transfer error
-             | DMA_CCR_TCIE  //Interrupt on transfer complete
-             | DMA_CCR_EN;   //Start DMA
+    dmaRx->CCR = DMA_CCR_MINC  //Increment RAM pointer
+               | 0              //Peripheral to memory
+               | DMA_CCR_TEIE  //Interrupt on transfer error
+               | DMA_CCR_TCIE  //Interrupt on transfer complete
+               | DMA_CCR_EN;   //Start DMA
     #else //_ARCH_CORTEXM4_STM32F3
     #if !defined(_ARCH_CORTEXM7_STM32F7) && !defined(_ARCH_CORTEXM7_STM32H7) \
      && !defined(_ARCH_CORTEXM0_STM32F0)
@@ -1200,21 +1325,29 @@ void STM32Serial::IRQdmaReadStart()
     #endif //_ARCH_CORTEXM7_STM32F7/H7
     dmaRx->M0AR=reinterpret_cast<unsigned int>(rxBuffer);
     dmaRx->NDTR=rxQueueMin;
-    dmaRx->CR=DMA_SxCR_CHSEL_2 //Select channel 4 (USART_RX)
-                   | DMA_SxCR_MINC    //Increment RAM pointer
-                   | 0                //Peripheral to memory
-                   | DMA_SxCR_HTIE    //Interrupt on half transfer
-                   | DMA_SxCR_TEIE    //Interrupt on transfer error
-                   | DMA_SxCR_DMEIE   //Interrupt on direct mode error
-                   | DMA_SxCR_EN;     //Start the DMA
+    #ifndef _ARCH_CORTEXM7_STM32H7
+    dmaRx->CR = DMA_SxCR_CHSEL_2 //Select channel 2 (USART_RX)
+              | DMA_SxCR_MINC    //Increment RAM pointer
+              | 0                //Peripheral to memory
+              | DMA_SxCR_HTIE    //Interrupt on half transfer
+              | DMA_SxCR_TEIE    //Interrupt on transfer error
+              | DMA_SxCR_DMEIE   //Interrupt on direct mode error
+              | DMA_SxCR_EN;     //Start the DMA
+    #else
+    dmaRx->CR = DMA_SxCR_MINC    //Increment RAM pointer
+              | 0                //Peripheral to memory
+              | DMA_SxCR_HTIE    //Interrupt on half transfer
+              | DMA_SxCR_TEIE    //Interrupt on transfer error
+              | DMA_SxCR_DMEIE   //Interrupt on direct mode error
+              | DMA_SxCR_EN;     //Start the DMA
+    #endif // _ARCH_CORTEXM7_STM32H7
     #endif //_ARCH_CORTEXM4_STM32F3
-    #endif //_ARCH_CORTEXM3_STM32F1
 }
 
 int STM32Serial::IRQdmaReadStop()
 {
     #if defined(_ARCH_CORTEXM3_STM32F1) || defined(_ARCH_CORTEXM4_STM32F3) \
-     || defined(_ARCH_CORTEXM4_STM32L4)
+     || defined(_ARCH_CORTEXM4_STM32L4) 
     dmaRx->CCR=0;
     static const unsigned int irqMask[]=
     {
@@ -1228,18 +1361,39 @@ int STM32Serial::IRQdmaReadStop()
     //Stop DMA and wait for it to actually stop
     dmaRx->CR &= ~DMA_SxCR_EN;
     while(dmaRx->CR & DMA_SxCR_EN) ;
+
+
+    #ifdef _ARCH_CORTEXM7_STM32H7
+    static const unsigned int irqMask[]=
+    {
+        (DMA_HIFCR_CTCIF5 | DMA_HIFCR_CHTIF5 | DMA_HIFCR_CTEIF5 | DMA_HIFCR_CDMEIF5 | DMA_HIFCR_CFEIF5),
+        (DMA_HIFCR_CTCIF4 | DMA_HIFCR_CHTIF4 | DMA_HIFCR_CTEIF4 | DMA_HIFCR_CDMEIF4 | DMA_HIFCR_CFEIF4),
+        (DMA_LIFCR_CTCIF1 | DMA_LIFCR_CHTIF1 | DMA_LIFCR_CTEIF1 | DMA_LIFCR_CDMEIF1 | DMA_LIFCR_CFEIF1)
+    };
+    #else
     static const unsigned int irqMask[]=
     {
         (DMA_HIFCR_CTCIF5 | DMA_HIFCR_CHTIF5 | DMA_HIFCR_CTEIF5 | DMA_HIFCR_CDMEIF5 | DMA_HIFCR_CFEIF5),
         (DMA_HIFCR_CTCIF5 | DMA_HIFCR_CHTIF5 | DMA_HIFCR_CTEIF5 | DMA_HIFCR_CDMEIF5 | DMA_HIFCR_CFEIF5),
         (DMA_LIFCR_CTCIF1 | DMA_LIFCR_CHTIF1 | DMA_LIFCR_CTEIF1 | DMA_LIFCR_CDMEIF1 | DMA_LIFCR_CFEIF1)
     };
+    #endif
+
+    #ifdef _ARCH_CORTEXM7_STM32H7
+    static volatile unsigned long * const irqRegs[]=
+    {
+        &DMA1->HIFCR,
+        &DMA1->HIFCR,
+        &DMA1->LIFCR
+    };
+    #else
     static volatile unsigned long * const irqRegs[]=
     {
         &DMA2->HIFCR,
         &DMA1->HIFCR,
         &DMA1->LIFCR
     };
+    #endif
     *irqRegs[getId()-1]=irqMask[getId()-1];
     return rxQueueMin-dmaRx->NDTR;
     #endif //_ARCH_CORTEXM3_STM32F1

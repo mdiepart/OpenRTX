@@ -39,7 +39,7 @@ namespace miosix {
 //
 
 TerminalDevice::TerminalDevice(intrusive_ref_ptr<Device> device)
-        : FileBase(intrusive_ref_ptr<FilesystemBase>()), device(device),
+        : FileBase(intrusive_ref_ptr<FilesystemBase>(),O_RDWR), device(device),
           mutex(), echo(true), binary(false), skipNewline(false) {}
 
 ssize_t TerminalDevice::write(const void *data, size_t length)
@@ -95,10 +95,9 @@ ssize_t TerminalDevice::read(void *data, size_t length)
 
 #ifdef WITH_FILESYSTEM
 
-off_t TerminalDevice::lseek(off_t pos, int whence)
-{
-    return -EBADF;
-}
+off_t TerminalDevice::lseek(off_t pos, int whence) { return -EBADF; }
+
+int TerminalDevice::ftruncate(off_t size) { return -EINVAL; }
 
 int TerminalDevice::fstat(struct stat *pstat) const
 {

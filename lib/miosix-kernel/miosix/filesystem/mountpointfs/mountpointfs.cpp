@@ -108,7 +108,7 @@ int MountpointFsDirectory::getdents(void *dp, int len)
         if(it==dirs.end()) return -EBADF;
         for(;it!=dirs.end();++it)
         {
-            if(addEntry(&buffer,end,it->second,DT_DIR,it->first)>0) continue;
+            if(addEntry(&buffer,end,it->second,DT_DIR,it->first.c_str())>0) continue;
             //Buffer finished
             currentItem=it->first.c_str();
             return buffer-begin;
@@ -161,6 +161,11 @@ int MountpointFs::lstat(StringPart& name, struct stat *pstat)
     pstat->st_nlink=1;
     pstat->st_blksize=512;
     return 0;
+}
+
+int MountpointFs::truncate(StringPart& name, off_t size)
+{
+    return -ENOENT;
 }
 
 int MountpointFs::unlink(StringPart& name)

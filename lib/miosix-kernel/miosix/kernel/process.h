@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2012 by Terraneo Federico                               *
+ *   Copyright (C) 2012-2024 by Terraneo Federico                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -25,8 +25,7 @@
  *   along with this program; if not, see <http://www.gnu.org/licenses/>   *
  ***************************************************************************/ 
 
-#ifndef PROCESS_H
-#define	PROCESS_H
+#pragma once
 
 #include <vector>
 #include <map>
@@ -43,48 +42,9 @@
 
 namespace miosix {
 
-/**
- * List of Miosix syscalls
- */
-enum Syscalls
-{
-    // Yield. Can be called both by kernel threads and process threads both in
-    // userspace and kernelspace mode. It causes the scheduler to switch to
-    // another thread. It is the only SVC that is available also when processes
-    // are disabled in miosix_config.h. No parameters, no return value.
-    SYS_YIELD=0,
-    // Back to userspace. It is used by process threads running in kernelspace
-    // mode to return to userspace mode after completing an SVC. If called by a
-    // process thread already in userspace mode it does nothing. Use of this
-    // SVC by kernel threads is forbidden. No parameters, no return value.
-    SYS_USERSPACE=1,
-    
-    // Standard unix syscalls. Use of these SVC by kernel threads is forbidden.
-    SYS_EXIT=2,
-    SYS_WRITE=3,
-    SYS_READ=4,
-    SYS_USLEEP=5,
-    SYS_OPEN=6,
-    SYS_CLOSE=7,
-    SYS_LSEEK=8,
-    SYS_SYSTEM=9,
-    SYS_FSTAT=10,
-    SYS_ISATTY=11,
-    SYS_STAT=12,
-    SYS_LSTAT=13,
-    SYS_FCNTL=14,
-    SYS_IOCTL=15,
-    SYS_GETDENTS=16,
-    SYS_GETCWD=17,
-    SYS_CHDIR=18,
-    SYS_MKDIR=19,
-    SYS_RMDIR=20,
-    SYS_UNLINK=21,
-    SYS_RENAME=22
-};
-
 //Forware decl
 class Process;
+class ArgsBlock;
 
 /**
  * This class contains the fields that are in common between the kernel and
@@ -95,26 +55,40 @@ class ProcessBase
 public:
     /**
      * Constructor
+     * A ProcessBase is constructed with a default-constructed file descriptor
+     * table. The kernel itself (which is process 0 and is the only ProcessBase
+     * that is not also a Process derived class) is constructed this way.
      */
-    ProcessBase() : pid(0), ppid(0) {}
+    ProcessBase() {}
+
+    /**
+     * Constructor
+     * Constrcts a ProcessBase so that it inherits the file descriptor table
+     * from the parent process.
+     * \param fdt file descriptor table of the parent process
+     */
+    ProcessBase(const FileDescriptorTable& fdt) : fileTable(fdt) {}
     
     /**
      * \return the process' pid 
      */
     pid_t getPid() const { return pid; }
     
+    /**
+     * \return the process file descriptor table
+     */
     FileDescriptorTable& getFileTable() { return fileTable; }
     
 protected:
-    pid_t pid;  ///<The pid of this process
-    pid_t ppid; ///<The parent pid of this process
+    pid_t pid=0;  ///<The pid of this process
+    pid_t ppid=0; ///<The parent pid of this process
     std::list<Process *> childs;   ///<Living child processes are stored here
     std::list<Process *> zombies;  ///<Dead child processes are stored here
     FileDescriptorTable fileTable; ///<The file descriptor table
     
 private:
-    ProcessBase(const ProcessBase&);
-    ProcessBase& operator= (const ProcessBase&);
+    ProcessBase(const ProcessBase&)=delete;
+    ProcessBase& operator= (const ProcessBase&)=delete;
     
     friend class Process;
 };
@@ -128,11 +102,38 @@ public:
     /**
      * Create a new process
      * \param program Program that the process will execute
+     * \param args program arguments and environment variables
      * \return the pid of the newly created process
      * \throws std::exception or a subclass in case of errors, including
      * not emough memory to spawn the process
      */
-    static pid_t create(const ElfProgram& program);
+    static pid_t create(ElfProgram&& program, ArgsBlock&& args);
+
+    /**
+     * Create a new process from a file in the filesystem
+     * \param path file path of the program to spawn
+     * \param argv program arguments
+     * \param envp program environment variables
+     * \param narg number of arguments
+     * \param nenv number of environment variables
+     * \return the pid of the newly created process
+     * \throws std::exception or a subclass in case of errors, including
+     * not emough memory to spawn the process
+     */
+    static pid_t spawn(const char *path, const char* const* argv,
+            const char* const* envp, int narg, int nenv);
+
+    /**
+     * Create a new process from a file in the filesystem
+     * \param path file path of the program to spawn
+     * \param argv program arguments
+     * \param envp program environment variables
+     * \return the pid of the newly created process
+     * \throws std::exception or a subclass in case of errors, including
+     * not emough memory to spawn the process
+     */
+    static pid_t spawn(const char *path, const char* const* argv=nullptr,
+                       const char* const* envp=nullptr);
     
     /**
      * Given a process, returns the pid of its parent.
@@ -146,7 +147,7 @@ public:
      * Wait for child process termination
      * \param exit the process exit code will be returned here, if the pointer
      * is not null
-     * \return the pid of the terminated process, or -1 in case of errors
+     * \return the pid of the terminated process, or an error code
      */
     static pid_t wait(int *exit) { return waitpid(-1,exit,0); }
     
@@ -156,7 +157,7 @@ public:
      * \param exit the process exit code will be returned here, if the pointer
      * is not null
      * \param options only 0 and WNOHANG are supported
-     * \return the pid of the terminated process, or -1 in case of errors. In
+     * \return the pid of the terminated process, or an error code. In
      * case WNOHANG  is specified and the specified process has not terminated,
      * 0 is returned
      */
@@ -171,9 +172,19 @@ private:
     
     /**
      * Constructor
+     * \param fdt file descriptor table of the parent process
      * \param program program that will be executed by the process
+     * \param args program arguments and environment variables
      */
-    Process(const ElfProgram& program);
+    Process(const FileDescriptorTable& fdt, ElfProgram&& program,
+            ArgsBlock&& args);
+
+    /**
+     * Load the a program into memory to be run as a process
+     * \param program program that will be executed by the process
+     * \param args program arguments and environment variables
+     */
+    void load(ElfProgram&& program, ArgsBlock&& args);
     
     /**
      * Contains the process' main loop. 
@@ -181,6 +192,14 @@ private:
      * \return null
      */
     static void *start(void *argv);
+
+    enum SvcResult
+    {
+        Resume=0,   ///< Process can switch to userspace and resume operation
+        Exit=1,     ///< Process exited
+        Execve=2,   ///< Process can resume, but the program has been switched
+        Segfault=3  ///< Unrecoverable error occurred
+    };
     
     /**
      * Handle a supervisor call
@@ -188,7 +207,7 @@ private:
      * \return true if the process can continue running, false if it has
      * terminated
      */
-    bool handleSvc(miosix_private::SyscallParameters sp);
+    SvcResult handleSvc(miosix_private::SyscallParameters sp);
     
     /**
      * \return an unique pid that is not zero and is not already in use in the
@@ -200,6 +219,9 @@ private:
     ProcessImage image; ///<The RAM image of a process
     miosix_private::FaultData fault; ///< Contains information about faults
     MPUConfiguration mpu; ///<Memory protection data
+    int argc;   ///< Process argument count
+    void *argvSp; ///< Ptr to argument array within ProcessImage and initial sp
+    void *envp; ///< Pointer to the environment array within the ProcessImage
     
     std::vector<Thread *> threads; ///<Threads that belong to the process
     
@@ -222,8 +244,160 @@ private:
     friend class EDFScheduler;
 };
 
+/**
+ * Class used to create a copy of the argv and envp data during calls such as
+ * execve
+ */
+class ArgsBlock
+{
+public:
+    /**
+     * Default constructor, yields an invalid object
+     */
+    ArgsBlock() {}
+
+    /**
+     * Constructor
+     * \param argv argv array
+     * \param envp env array
+     * \param narg number of elements of argv array
+     * \param nenv number of elements of envp array
+     */
+    ArgsBlock(const char* const* argv, const char* const* envp, int narg, int nenv);
+
+    /**
+     * \return true if the object is valid
+     */
+    bool valid() const { return block!=nullptr; }
+
+    /**
+     * \return the pointer to the arg block data
+     */
+    const char *data() const { return block; }
+
+    /**
+     * \return the arg block size
+     */
+    unsigned int size() const { return blockSize; }
+
+    /**
+     * \return the number of arguments
+     */
+    int getNumberOfArguments() const { return narg; }
+
+    /**
+     * \return the position in the arg block of the envp array
+     * block()+getArgIndex() is the envp array
+     */
+    unsigned int getEnvIndex() const { return envArrayIndex; }
+
+    /**
+     * Copy the args block to a target destination, performing a fixup of the
+     * pointers so that the target args block contains the argv and envp array
+     * whose pointers point to the target args block, not the source one.
+     * \param target pointer to a memory area whose size is at least size()
+     * bytes where the args block will be copied and relocated
+     */
+    void relocateTo(char *target);
+
+    /**
+     * Destructor
+     */
+    ~ArgsBlock();
+
+    ArgsBlock(const ArgsBlock&)=delete;
+    ArgsBlock& operator=(const ArgsBlock&)=delete;
+
+private:
+    char *block=nullptr;          ///< Buffer where args/env are packed
+    unsigned int blockSize=0;     ///< Size of buffer
+    unsigned int envArrayIndex=0; ///< Offset into buffer of env array
+    int narg=0;                   ///< Number of args
+};
+
+/**
+ * List of Miosix syscalls
+ */
+enum class Syscall
+{
+    // Yield. Can be called both by kernel threads and process threads both in
+    // userspace and kernelspace mode. It causes the scheduler to switch to
+    // another thread. It is the only SVC that is available also when processes
+    // are disabled in miosix_config.h. No parameters, no return value.
+    YIELD=0,
+    // Back to userspace. It is used by process threads running in kernelspace
+    // mode to return to userspace mode after completing an SVC. If called by a
+    // process thread already in userspace mode it does nothing. Use of this
+    // SVC by kernel threads is forbidden. No parameters, no return value.
+    USERSPACE=1,
+
+    // All other syscalls. Use of these SVC by kernel threads is forbidden.
+    // Kernel should just call the functions with the corresponding name
+    // (kercalls) in stdlib_integration
+
+    // File/directory syscalls
+    OPEN      = 2,
+    CLOSE     = 3,
+    READ      = 4,
+    WRITE     = 5,
+    LSEEK     = 6,
+    STAT      = 7,
+    LSTAT     = 8,
+    FSTAT     = 9,
+    FCNTL     = 10,
+    IOCTL     = 11,
+    ISATTY    = 12,
+    GETCWD    = 13,
+    CHDIR     = 14,
+    GETDENTS  = 15,
+    MKDIR     = 16,
+    RMDIR     = 17,
+    LINK      = 18,
+    UNLINK    = 19,
+    SYMLINK   = 20,
+    READLINK  = 21,
+    TRUNCATE  = 22,
+    FTRUNCATE = 23,
+    RENAME    = 24,
+    CHMOD     = 25,
+    FCHMOD    = 26,
+    CHOWN     = 27,
+    FCHOWN    = 28,
+    LCHOWN    = 29,
+    DUP       = 30,
+    DUP2      = 31,
+    PIPE      = 32,
+    ACCESS    = 33,
+    //From 34 to 37 reserved for future use
+
+    // Time syscalls
+    GETTIME   = 38,
+    SETTIME   = 39,
+    NANOSLEEP = 40,
+    GETRES    = 41,
+    ADJTIME   = 42,
+
+    // Process syscalls
+    EXIT      = 43,
+    EXECVE    = 44,
+    SPAWN     = 45,
+    KILL      = 46,
+    WAITPID   = 47,
+    GETPID    = 48,
+    GETPPID   = 49,
+    GETUID    = 50,
+    GETGID    = 51,
+    GETEUID   = 52,
+    GETEGID   = 53,
+    SETUID    = 54,
+    SETGID    = 55,
+
+    // Filesystem syscalls
+    MOUNT     = 56,
+    UMOUNT    = 57,
+    MKFS      = 58, //Moving filesystem creation code to kernel
+};
+
 } //namespace miosix
 
 #endif //WITH_PROCESSES
-
-#endif //PROCESS_H

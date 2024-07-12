@@ -35,6 +35,8 @@ using namespace std;
 
 namespace miosix {
 
+#if defined(WITH_FILESYSTEM) || defined(WITH_DEVFS)
+
 static const int _NOSEEK=0x20000; //Special flag used only here to disallow seek
 
 static void fillStatHelper(struct stat* pstat, unsigned int st_ino,
@@ -61,8 +63,8 @@ public:
      * \param flags file open flags (_FREAD, _FWRITE, ...)
      */
     DevFsFile(intrusive_ref_ptr<FilesystemBase> fs,
-            intrusive_ref_ptr<Device> dev, int flags) : FileBase(fs),
-            dev(dev), seekPoint(0), flags(flags) {}
+            intrusive_ref_ptr<Device> dev, int flags) : FileBase(fs,flags),
+            dev(dev), seekPoint(0) {}
 
     /**
      * Write data to the file, if the file supports writing.
@@ -91,6 +93,13 @@ public:
      * completed, or a negative number in case of errors
      */
     virtual off_t lseek(off_t pos, int whence);
+
+    /**
+     * Truncate the file
+     * \param size new file size
+     * \return 0 on success, or a negative number on failure
+     */
+    virtual int ftruncate(off_t size);
     
     /**
      * Return file information.
@@ -117,7 +126,6 @@ public:
 private:
     intrusive_ref_ptr<Device> dev; ///< Device file
     off_t seekPoint;               ///< Seek point (note that off_t is 64bit)
-    int flags;                     ///< File open flags
 };
 
 ssize_t DevFsFile::write(const void *data, size_t len)
@@ -161,6 +169,8 @@ off_t DevFsFile::lseek(off_t pos, int whence)
     return seekPoint;
 }
 
+int DevFsFile::ftruncate(off_t size) { return -EINVAL; }
+
 int DevFsFile::fstat(struct stat *pstat) const
 {
     return dev->fstat(pstat);
@@ -200,6 +210,8 @@ int Device::isatty() const
 {
     return tty ? 1 : 0;
 }
+
+#endif //WITH_FILESYSTEM || WITH_DEVFS
 
 ssize_t Device::readBlock(void *buffer, size_t size, off_t where)
 {
@@ -293,7 +305,7 @@ int DevFsDirectory::getdents(void *dp, int len)
         {
             struct stat st;
             it->second->fstat(&st);
-            if(addEntry(&buffer,end,st.st_ino,st.st_mode>>12,it->first)>0)
+            if(addEntry(&buffer,end,st.st_ino,st.st_mode>>12,it->first.c_str())>0)
                 continue;
             //Buffer finished
             currentItem=it->first.c_str();
@@ -368,6 +380,8 @@ int DevFs::lstat(StringPart& name, struct stat *pstat)
     if(it==files.end()) return -ENOENT;
     return it->second->fstat(pstat);
 }
+
+int DevFs::truncate(StringPart& name, off_t size) { return -EINVAL; }
 
 int DevFs::unlink(StringPart& name)
 {
