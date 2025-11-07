@@ -666,7 +666,7 @@ void ui_updateFSM(bool *sync_rtx)
                     _ui_menuDown(display_num);
                 else if(msg.keys & KEY_ESC)
                     {
-                        nvm_writeSettings(&state.settings);
+                        settings_save(&state.settings);
                         _ui_menuBack(MENU_SETTINGS);
                     }
                 break;
@@ -760,7 +760,7 @@ void ui_updateFSM(bool *sync_rtx)
                     else if(msg.keys & KEY_ESC)
                     {
                         *sync_rtx = true;
-                        nvm_writeSettings(&state.settings);
+                        settings_save(&state.settings);
                         _ui_menuBack(MENU_SETTINGS);
                     }
                 }
@@ -793,7 +793,7 @@ void ui_updateFSM(bool *sync_rtx)
                         mod17CalData.mic_gain     = 0;
 
                         state_resetSettingsAndVfo();
-                        nvm_writeSettings(&state.settings);
+                        settings_save(&state.settings);
                         _ui_menuBack(MENU_SETTINGS);
                     }
                     else if(msg.keys & KEY_ESC)
@@ -869,7 +869,7 @@ void ui_updateFSM(bool *sync_rtx)
                     _ui_menuDown(module17_num);
                 else if(msg.keys & KEY_ESC)
                 {
-                    nvm_writeSettings(&state.settings);
+                    settings_save(&state.settings);
                     _ui_menuBack(MENU_SETTINGS);
                 }
                 break;

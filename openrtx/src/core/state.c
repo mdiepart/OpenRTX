@@ -15,6 +15,7 @@
 #include "interfaces/platform.h"
 #include "interfaces/nvmem.h"
 #include "interfaces/delays.h"
+#include "core/settings_manager.hpp"
 
 state_t state;
 pthread_mutex_t state_mutex;
@@ -34,12 +35,7 @@ void state_init()
      * Try loading settings from nonvolatile memory and default to sane values
      * in case of failure.
      */
-    if(nvm_readSettings(&state.settings) < 0)
-    {
-        state.settings = default_settings;
-        strncpy(state.settings.callsign, "OPNRTX", 10);
-        strncpy(state.settings.M17_meta_text, "OPENRTX", 53);
-    }
+    settings_load(&state.settings);
 
     /*
      * Try loading VFO configuration from nonvolatile memory and default to sane
@@ -77,13 +73,9 @@ void state_init()
 
 void state_terminate()
 {
-    // Never store a brightness of 0 to avoid booting with a black screen
-    if(state.settings.brightness == 0)
-    {
-        state.settings.brightness = 5;
-    }
-
-    nvm_writeSettingsAndVfo(&state.settings, &state.channel);
+    settings_save(&state.settings);
+    // nvm_writeSettingsAndVfo(&state.settings, &state.channel);
+    // TODO: move to new settings manager
     pthread_mutex_destroy(&state_mutex);
 }
 
