@@ -184,7 +184,7 @@ int nvm_readSettings(settings_t *settings)
 
 int nvm_writeSettings(const settings_t *settings)
 {
-    return nvm_write(0, 2, 0, settings, sizeof(settings_t));
+    return nvm_write(0, 2, NVM_SETTINGS_BASE + offset, slice, len);
 }
 
 int nvm_writeSettingsAndVfo(const settings_t *settings, const channel_t *vfo)
