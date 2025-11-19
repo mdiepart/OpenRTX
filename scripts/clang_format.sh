@@ -48,7 +48,7 @@ openrtx/include/core/memory_profiling.h
 openrtx/include/core/nvmem_access.h
 openrtx/include/core/nvmem_device.h
 openrtx/include/core/openrtx.h
-openrtx/include/core/settings_manager.hpp
+openrtx/include/core/nvm_slice_manager.h
 openrtx/include/core/ui.h
 openrtx/include/core/utils.h
 openrtx/include/core/xmodem.h
@@ -71,7 +71,7 @@ openrtx/src/core/nvmem_access.c
 openrtx/src/core/memory_profiling.cpp
 openrtx/src/protocols/M17/Callsign.cpp
 openrtx/src/protocols/M17/M17FrameDecoder.cpp
-openrtx/src/core/settings_manager.cpp
+openrtx/src/core/nvm_slice_manager.cpp
 platform/drivers/ADC/ADC0_GDx.h
 platform/drivers/audio/file_source.h
 platform/drivers/audio/file_source.c
