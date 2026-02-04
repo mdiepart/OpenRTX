@@ -1175,6 +1175,9 @@ gfx_text_test = executable('gfx_text_test',
 aprs_packet_test = executable('aprs_packet_test',
                               sources : unit_test_src + ['tests/unit/APRS_packet.cpp'],
                               kwargs  : unit_test_opts)
+aprs_test = executable('aprs-test',
+                       sources : unit_test_src + ['tests/unit/APRS.cpp'],
+                       kwargs  : unit_test_opts)
 
 test('M17 Golay Unit Test',   m17_golay_test)
 test('M17 Viterbi Unit Test', m17_viterbi_test)
@@ -1195,3 +1198,4 @@ rtx_tx_disable_test = executable('rtx_tx_disable_test',
 test('RTX TX Disable Test', rtx_tx_disable_test)
 test('GFX Text Test',        gfx_text_test)
 test('APRS Packet Test', aprs_packet_test)
+test('APRS Test', aprs_test)
