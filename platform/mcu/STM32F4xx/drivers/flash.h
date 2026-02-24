@@ -33,8 +33,16 @@ bool flash_eraseSector(const uint8_t secNum);
  * @param address: starting address for the write operation.
  * @param data: data to be written.
  * @param len: data length.
+ * @return true for successful write, false otherwise
  */
-void flash_write(const uint32_t address, const void *data, const size_t len);
+bool flash_write(const uint32_t address, const void *data, const size_t len);
+
+/**
+ * Returns the flash size in kB as stored in the device itself.
+ *
+ * @return device flash size in kB
+*/
+uint16_t flash_size();
 
 #ifdef __cplusplus
 }
