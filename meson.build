@@ -810,87 +810,100 @@ targets = [
   {
     'name'     : 'linux',
     'opts'     : linux_opts,
-    'flashable': false
+    'flashable': false,
+    'cpu'      : 'linux'
   },
   {
     'name'     : 'linux_smallscreen',
     'opts'     : linux_small_opts,
-    'flashable': false
+    'flashable': false,
+    'cpu'      : 'linux'
   },
   {
     'name'     : 'linux_mod17',
     'opts'     : linux_mod17_opts,
-    'flashable': false
+    'flashable': false,
+    'cpu'      : 'linux'
   },
   {
     'name'     : 'md3x0',
     'opts'     : md3x0_opts,
     'flashable': true,
     'wrap'     : 'MD380',
-    'load_addr': '0x0800C000'
+    'load_addr': '0x0800C000',
+    'cpu'      : 'cm4'
   },
   {
     'name'     : 'mduv3x0',
     'opts'     : mduv3x0_opts,
     'flashable': true,
     'wrap'     : 'UV3X0',
-    'load_addr': '0x0800C000'
+    'load_addr': '0x0800C000',
+    'cpu'      : 'cm4'
   },
   {
     'name'     : 'gd77',
     'opts'     : gd77_opts,
     'flashable': true,
     'wrap'     : 'GD-77',
-    'load_addr': '0x0800C000'
+    'load_addr': '0x0800C000',
+    'cpu'      : 'cm4'
   },
   {
     'name'     : 'dm1801',
     'opts'     : dm1801_opts,
     'flashable': true,
     'wrap'     : 'DM-1801',
-    'load_addr': '0x0800C000'
+    'load_addr': '0x0800C000',
+    'cpu'      : 'cm4'
   },
   {
     'name'     : 'md9600',
     'opts'     : md9600_opts,
     'flashable': true,
     'wrap'     : 'MD9600',
-    'load_addr': '0x0800C000'
+    'load_addr': '0x0800C000',
+    'cpu'      : 'cm4'
   },
   {
     'name'     : 'mod17',
     'opts'     : mod17_opts,
     'flashable': true,
     'wrap'     : ' ',
-    'load_addr': ' '
+    'load_addr': ' ',
+    'cpu'      : 'cm4'
   },
   {
     'name'     : 'ttwrplus',
     'opts'     : ttwrplus_opts,
     'flashable': true,
     'wrap'     : ' ',
-    'load_addr': ' '
+    'load_addr': ' ',
+    'cpu'      : 'lx7'
   },
   {
     'name'     : 'cs7000',
     'opts'     : cs7000_opts,
     'flashable': true,
     'wrap'     : 'cs7000',
-    'load_addr': '0x08000000'
+    'load_addr': '0x08000000',
+    'cpu'      : 'cm4'
   },
   {
     'name'     : 'cs7000p',
     'opts'     : cs7000p_opts,
     'flashable': true,
     'wrap'     : ' ',
-    'load_addr': '0x08100000'
+    'load_addr': '0x08100000',
+    'cpu'      : 'cm7'
   },
   {
     'name'     : 'dm1701',
     'opts'     : dm1701_opts,
     'flashable': true,
     'wrap'     : 'DM1701',
-    'load_addr': '0x0800C000'
+    'load_addr': '0x0800C000',
+    'cpu'      : 'cm4'
   },
 ]
 
@@ -903,6 +916,10 @@ west        = find_program('west',                             required:false, d
 uf2conv     = find_program('scripts/uf2conv.py',               required:false, disabler:true)
 dfu_convert = find_program('scripts/dfu-convert.py',           required:false, disabler:true)
 cs7000_wrap = find_program('scripts/cs7000_wrap.py',           required:false, disabler:true)
+
+cm4_targets = []
+cm7_targets = []
+linux_targets = []
 
 foreach t : targets
 
@@ -963,7 +980,6 @@ foreach t : targets
                      c_args              : target_opts['c_args'],
                      cpp_args            : target_opts['cpp_args'],
                      link_args           : target_opts['link_args'])
-
     if t['flashable']
 
       bin = custom_target(name+'_bin',
@@ -1039,8 +1055,20 @@ foreach t : targets
 
     endif
 
+    if t['cpu'] == 'cm4'
+      cm4_targets += exe
+    elif t['cpu'] == 'cm7'
+      cm7_targets += exe
+    elif t['cpu'] == 'linux'
+      linux_targets += exe
+    endif
+
   endif
 endforeach
+
+cm4 = alias_target('cm4', cm4_targets)
+cm7 = alias_target('cm7', cm7_targets)
+linux = alias_target('linux', linux_targets)
 
 ##
 ## ----------------------------------- Unit Tests ------------------------------
@@ -1065,7 +1093,7 @@ m17_viterbi_test = executable('m17_viterbi_test',
 m17_callsign_test = executable('m17_callsign_test',
                       sources : unit_test_src + ['tests/unit/M17_callsign.cpp'],
                       kwargs  : unit_test_opts)
-                 
+
 m17_demodulator_test = executable('m17_demodulator_test',
                             sources: unit_test_src + ['tests/unit/M17_demodulator.cpp'],
                             kwargs: unit_test_opts)
