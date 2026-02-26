@@ -25,6 +25,7 @@ static inline bool unlock_bank1()
 
     FLASH->KEYR1 = 0x45670123;
     FLASH->KEYR1 = 0xCDEF89AB;
+    __ISB();
 
     // Succesful unlock
     if ((FLASH->CR1 & FLASH_CR_LOCK) == 0) {
@@ -49,6 +50,7 @@ static inline bool unlock_bank2()
 
     FLASH->KEYR2 = 0x45670123;
     FLASH->KEYR2 = 0xCDEF89AB;
+    __ISB();
 
     // Succesful unlock
     if ((FLASH->CR2 & FLASH_CR_LOCK) == 0) {
@@ -74,12 +76,12 @@ bool flash_eraseSector_bank(const uint8_t secNum, const uint8_t bank)
         FLASH->CR1 |= FLASH_CR_SER;                 // Sector erase
         FLASH->CR1 &= ~FLASH_CR_SNB;
         FLASH->CR1 |= (secNum << FLASH_CR_SNB_Pos); // Sector number
+        __ISB();
         FLASH->CR1 |= FLASH_CR_START;               // Start erase
 
         // Wait until erase ends
         while ((FLASH->SR1 & FLASH_SR_QW) != 0)
             ;
-
         FLASH->CR1 &= ~FLASH_CR_SER;
 
         return true;
@@ -94,12 +96,12 @@ bool flash_eraseSector_bank(const uint8_t secNum, const uint8_t bank)
         FLASH->CR2 |= FLASH_CR_SER;                 // Sector erase
         FLASH->CR2 &= ~FLASH_CR_SNB;
         FLASH->CR2 |= (secNum << FLASH_CR_SNB_Pos); // Sector number
+        __ISB();
         FLASH->CR2 |= FLASH_CR_START;               // Start erase
 
         // Wait until erase ends
         while ((FLASH->SR2 & FLASH_SR_QW) != 0)
             ;
-
         FLASH->CR2 &= ~FLASH_CR_SER;
 
         return true;
@@ -131,51 +133,46 @@ bool flash_write(const uint32_t address, const void *data, const size_t len)
             return false;
     }
 
-    size_t total_words = len / 4; // Number of 32 bits words
-    size_t bank1_words = 0;
+    size_t total_len = len; // Number of 32 bits words
+    size_t bank1_len = 0;
     if (address < 0x8100000) {
-        bank1_words = (0x8100000 - address) / 4;
-        if (bank1_words > total_words)
-            bank1_words = total_words;
+        bank1_len = (0x8100000 - address);
+        if (bank1_len > total_len)
+            bank1_len = total_len;
     }
 
     // Write data to memory, 32 bits at a time
-    const uint32_t *buf = ((uint32_t *)data);
-    uint32_t *mem = ((uint32_t *)address);
+    const uint8_t *buf = ((uint8_t *)data);
+    uint8_t *mem = ((uint8_t *)address);
 
-    size_t i = 0;        // Written words
-    if (bank1_words > 0) // Writes to bank 1
+    if (bank1_len > 0) // Writes to bank 1
     {
-        while ((FLASH->SR1 & FLASH_SR_BSY) != 0)
+        while ((FLASH->SR1 & FLASH_SR_QW) != 0)
             ;
         FLASH->CR1 = FLASH_CR_PG;
 
-        while (i < bank1_words) {
-            memcpy(mem, buf + i, 8);
-            mem += 8;
-            i += 8;
+        memcpy((void *)mem, (void *)buf, bank1_len);
+        __DSB();
 
-            while ((FLASH->SR1 & FLASH_SR_QW) != 0)
-                ;
-        }
+        while ((FLASH->SR1 & FLASH_SR_QW) != 0)
+            ;
+
+        mem += bank1_len;
+        buf += bank1_len;
 
         FLASH->CR1 &= ~FLASH_CR_PG;
     }
-    if (i < total_words) // Writes to bank 2
+    if (bank1_len < total_len) // Writes to bank 2
     {
-        while ((FLASH->SR2 & FLASH_SR_BSY) != 0)
+        while ((FLASH->SR2 & FLASH_SR_QW) != 0)
             ;
         FLASH->CR2 = FLASH_CR_PG;
 
-        while (i < total_words) {
-            memcpy(mem, buf + i, 8);
-            mem += 8;
-            i += 8;
+        memcpy((void *)mem, (void *)buf, total_len - bank1_len);
+        __DSB();
 
-            while ((FLASH->SR2 & FLASH_SR_QW) != 0)
-                ;
-        }
-
+        while ((FLASH->SR2 & FLASH_SR_QW) != 0)
+            ;
         FLASH->CR2 &= ~FLASH_CR_PG;
     }
 
