@@ -10,15 +10,18 @@
 #include "core/crc.h"
 #include "flash.h"
 
+#define CURRENT_VFO_VER 1
+
 /*
  * Data structures defining the memory layout used for saving and restore
  * of user settings and VFO configuration.
  */
 typedef struct
 {
-    uint16_t   crc;
-    settings_t settings;
-    channel_t  vfoData;
+    uint16_t    crc;
+    uint16_t    version;
+    settings_t  settings;
+    channel_t   vfoData;
 }
 __attribute__((packed)) dataBlock_t;
 
@@ -73,6 +76,10 @@ static int findActiveBlock()
     block = (block * 32) + bit;
     block -= 1;
 
+    // Check VFO version
+    if(memory->data[block].version != CURRENT_VFO_VER)
+        return -3;
+
     // Check data validity
     uint16_t crc = crc_ccitt(&(memory->data[block].settings),
                              sizeof(settings_t) + sizeof(channel_t));
@@ -95,17 +102,6 @@ int nvm_readVfoChannelData(channel_t *channel)
     return 0;
 }
 
-int nvm_readSettings(settings_t *settings)
-{
-    int block = findActiveBlock();
-
-    // Invalid data found
-    if(block < 0) return -1;
-
-    memcpy(settings, &(memory->data[block].settings), sizeof(settings_t));
-
-    return 0;
-}
 
 int nvm_writeSettingsAndVfo(const settings_t *settings, const channel_t *vfo)
 {
@@ -113,6 +109,7 @@ int nvm_writeSettingsAndVfo(const settings_t *settings, const channel_t *vfo)
     int      block   = findActiveBlock();
     uint16_t prevCrc = 0;
 
+    nvm_writeSettings(settings);
     /*
      * Memory never initialised or save space finished: erase all the sector.
      * On STM32F405 the settings are saved in sector 11, starting at address
@@ -132,7 +129,8 @@ int nvm_writeSettingsAndVfo(const settings_t *settings, const channel_t *vfo)
     }
 
     dataBlock_t tmpBlock;
-    memcpy((&tmpBlock.settings), settings, sizeof(settings_t));
+    tmpBlock.version = CURRENT_VFO_VER;
+
     memcpy((&tmpBlock.vfoData), vfo, sizeof(channel_t));
     tmpBlock.crc = crc_ccitt(&(tmpBlock.settings),
                              sizeof(settings_t) + sizeof(channel_t));
