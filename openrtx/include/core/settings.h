@@ -87,8 +87,36 @@ static const settings_t default_settings =
     false,                        // Update RTC with GPS
 };
 
-struct settings_storage_s;
-typedef struct settings_storage_s settings_storage_t;
+
+/**
+ * Structure defining the binary layout of the settings in NVM memory
+ */
+typedef struct {
+    uint32_t MAGIC; ///< Must be 0x584E504F ("OPNX")
+    uint16_t
+        length; ///< length of this whole structure (incl. MAGIC, counter, length and CRC)
+    uint16_t
+        counter; ///< Free-running counter, incremented each time settings are savec
+    settings_t settings; ///< Device settings
+    uint16_t
+        crc; ///< CRC-16 (CCITT) checksum of this whole structure (incl. MAGIC, counter and length, excl. crc field itself)
+} __attribute__((packed)) settings_store_t;
+
+typedef struct settings_storage_s {
+    int dev;           ///< NVM device number
+    int part_A;        ///< NVM partition number for partition A
+    int part_B;        ///< NVM partition number for partition B
+    size_t
+        part_A_offset; ///< Offset to the end of the last settings store in partition A
+    size_t
+        part_B_offset; ///< Offset to the end of the last settings store in partition B
+    settings_store_t latest_store; ///< Contains the most up-to-date settings
+    bool initialized; ///< Do latest settings contain the settings read from nvm?
+    bool write_needed; ///< Do we need to write the settings (if settings have changed or saved settings are from an older version)
+    int part_A_status; ///< 1 if partition A is clean, 0 if partition A is empty, -1 if partition A is corrupted
+    int part_B_status; ///< 1 if partition B is clean, 0 if partition B is empty, -1 if partition B is corrupted
+} settings_storage_t;
+
 
 /**
  * Initialize a settings_storage_t structure to save and load device settings.

@@ -15,34 +15,7 @@
 
 const uint32_t SETTINGS_MAGIC = 0x584E504F; // "OPNX"
 
-/**
- * Structure defining the binary layout of the settings in NVM memory
- */
-typedef struct {
-    uint32_t MAGIC; ///< Must be 0x584E504F ("OPNX")
-    uint16_t
-        length; ///< length of this whole structure (incl. MAGIC, counter, length and CRC)
-    uint16_t
-        counter; ///< Free-running counter, incremented each time settings are savec
-    settings_t settings; ///< Device settings
-    uint16_t
-        crc; ///< CRC-16 (CCITT) checksum of this whole structure (incl. MAGIC, counter and length, excl. crc field itself)
-} __attribute__((packed)) settings_store_t;
 
-struct settings_storage_s {
-    int dev;           ///< NVM device number
-    int part_A;        ///< NVM partition number for partition A
-    int part_B;        ///< NVM partition number for partition B
-    size_t
-        part_A_offset; ///< Offset to the end of the last settings store in partition A
-    size_t
-        part_B_offset; ///< Offset to the end of the last settings store in partition B
-    settings_store_t latest_store; ///< Contains the most up-to-date settings
-    bool initialized; ///< Do latest settings contain the settings read from nvm?
-    bool write_needed; ///< Do we need to write the settings (if settings have changed or saved settings are from an older version)
-    int part_A_status; ///< 1 if partition A is clean, 0 if partition A is empty, -1 if partition A is corrupted
-    int part_B_status; ///< 1 if partition B is clean, 0 if partition B is empty, -1 if partition B is corrupted
-};
 
 /**
  * Returns a valid settings_store_t filled with default settings
@@ -314,6 +287,21 @@ int write_store(const int dev, const int part, const settings_store_t *store,
         return ret;
     *offset += sizeof(settings_store_t);
     return 0;
+}
+
+void print_store(settings_store_t *store)
+{
+    printf("Store at address 0x%08lX\r\n", (uint32_t)(store));
+    printf("\tMAGIC=0x%08lX\r\n", store->MAGIC);
+    printf("\tlength=%d\r\n", store->length);
+    printf("\tcounter=%d\r\n", store->counter);
+    printf("\tsettings=0x");
+    uint8_t *tmp = (uint8_t *)&(store->settings);
+    for(size_t i = 0; i < sizeof(settings_t); i++)
+    {
+        printf("%02X", tmp[i]);
+    }
+    printf("\r\n\tcrc=0x%04X\r\n", store->crc);
 }
 
 int settings_storage_init(settings_storage_t *s, const int nvm_dev,
