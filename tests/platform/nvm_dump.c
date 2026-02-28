@@ -1,6 +1,6 @@
 /*
  * SPDX-FileCopyrightText: Copyright 2020-2026 OpenRTX Contributors
- * 
+ *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
@@ -93,7 +93,7 @@ int main()
     while(nvm != NULL) {
         printf("NVM device %d:\r\n", idx);
         printf("\t - Name:  %s\r\n", nvm->name);
-        printf("\t - Size:  %d\r\n", nvm->dev->size);
+        printf("\t - Size:  %d\r\n", nvm->size);
         printf("\t - Flags: %04lx\r\n", nvm->dev->info->device_info);
         puts("\r");
 
@@ -101,16 +101,16 @@ int main()
         nvm = nvm_getDesc(idx);
     }
 
-    for(size_t i = 0; i < idx; i++) {
+    for(size_t i = 1; i < idx; i++) {
         nvm = nvm_getDesc(i);
 
         printf("\r\nNVM device %d: press PTT to dump\r\n", i);
         waitForPtt();
 
-        for(size_t addr = 0; addr < nvm->dev->size; addr += CHUNK_SIZE) {
+        for(size_t addr = 0; addr < nvm->size; addr += CHUNK_SIZE) {
             uint8_t chunk[CHUNK_SIZE];
 
-            nvm_devRead(nvm->dev, addr, chunk, sizeof(chunk));
+            nvm_read(i, 0, addr, chunk, sizeof(chunk));
             printChunk(addr, chunk, sizeof(chunk));
 
             // Exit in case of PTT press

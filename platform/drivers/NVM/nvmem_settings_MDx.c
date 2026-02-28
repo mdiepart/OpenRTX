@@ -118,7 +118,7 @@ int nvm_writeSettingsAndVfo(const settings_t *settings, const channel_t *vfo)
      * On STM32F405 the settings are saved in sector 11, starting at address
      * 0x08060000.
      */
-    if((block < 0) || (block >= 2047))
+    if((block < 0) || (block >= 1023))
     {
         flash_eraseSector(11);
         addr = ((uint32_t) &(memory->magic));
