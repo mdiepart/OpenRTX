@@ -117,6 +117,8 @@ typedef struct settings_storage_s {
     int part_B_status; ///< 1 if partition B is clean, 0 if partition B is empty, -1 if partition B is corrupted
 } settings_storage_t;
 
+void print_store(settings_store_t *store);
+void print_settings(settings_t *settings);
 
 /**
  * Initialize a settings_storage_t structure to save and load device settings.

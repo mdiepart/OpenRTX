@@ -12,6 +12,7 @@
 #include "core/nvmem_access.h"
 #include "interfaces/nvmem.h"
 #include "core/settings.h"
+#include <stdio.h>
 
 const uint32_t SETTINGS_MAGIC = 0x584E504F; // "OPNX"
 
@@ -99,7 +100,7 @@ int parse_partition(const int dev, const int part_nb, size_t *offset,
     size_t prev_offset = 0;
 
     // Go through the partition to find settings struct
-    while (*offset < limit) {
+    while (*offset < (limit-6) ) {
         int ret = nvm_read(dev, part_nb, *offset, buffer, 6);
         if (ret < 0)
             return ret;
@@ -117,7 +118,7 @@ int parse_partition(const int dev, const int part_nb, size_t *offset,
      * If offset > prev_offset and magic == 0xFFFFFFFF there is free space
      * If magic != 0xFFFFFFFF then the partition contains invalid data and needs to be cleaned
      */
-    if (*magic != 0xFFFFFFFF)
+    if ( (*magic != 0xFFFFFFFF) && (*magic != SETTINGS_MAGIC) )
         return -EILSEQ; // Partition contains invalid data
     else if (*offset == prev_offset)
         return -ENOENT; // Empty partition
@@ -291,8 +292,8 @@ int write_store(const int dev, const int part, const settings_store_t *store,
 
 void print_store(settings_store_t *store)
 {
-    printf("Store at address 0x%08lX\r\n", (uint32_t)(store));
-    printf("\tMAGIC=0x%08lX\r\n", store->MAGIC);
+    printf("Store at address 0x%08zX\r\n", (size_t)(store));
+    printf("\tMAGIC=0x%08X\r\n", store->MAGIC);
     printf("\tlength=%d\r\n", store->length);
     printf("\tcounter=%d\r\n", store->counter);
     printf("\tsettings=0x");
@@ -302,6 +303,18 @@ void print_store(settings_store_t *store)
         printf("%02X", tmp[i]);
     }
     printf("\r\n\tcrc=0x%04X\r\n", store->crc);
+}
+
+void print_settings(settings_t *settings)
+{
+    printf("Settings at address 0x%08zX\r\n", (size_t)(settings));
+    printf("\tcontent=0x");
+    uint8_t *tmp = (uint8_t *)(settings);
+    for(size_t i = 0; i < sizeof(settings_t); i++)
+    {
+        printf("%02X", tmp[i]);
+    }
+    printf("\r\n");
 }
 
 int settings_storage_init(settings_storage_t *s, const int nvm_dev,
@@ -377,6 +390,7 @@ int settings_storage_load(settings_storage_t *s, settings_t *settings)
             if (s->part_B_status == 1) // Part B is clean
             {
                 s->latest_store = store_B;
+                *settings = s->latest_store.settings;
                 s->initialized = true;
                 s->write_needed = store_B_stale;
                 return 0;
@@ -393,13 +407,14 @@ int settings_storage_load(settings_storage_t *s, settings_t *settings)
                     s->latest_store = store_B;
                     s->write_needed = store_B_stale;
                 }
-
+                *settings = s->latest_store.settings;
                 s->initialized = true;
                 return 0;
             } else // Part B is corrupt or empty
             {
                 s->latest_store = store_A;
                 s->write_needed = store_A_stale;
+                *settings = s->latest_store.settings;
                 s->initialized = true;
                 return 0;
             }
@@ -409,6 +424,7 @@ int settings_storage_load(settings_storage_t *s, settings_t *settings)
             &(s->latest_store)); // Init store with default settings
         if (ret < 0)
             return ret;
+        *settings = s->latest_store.settings;
         s->initialized = true;
         s->write_needed = true;
         return 0;
