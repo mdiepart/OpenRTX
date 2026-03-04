@@ -6,8 +6,8 @@ on:
 
 env:
   RADIO_TOOL_VERSION: 0.2.2
-  BRANCH_NAME: ${{ github.head_ref || github.ref_name }} 
-  DEVCONTAINER_NAME: ghcr.io/openrtx/openrtx-devcontainer
+  BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+  DEVCONTAINER_NAME: ghcr.io/${{github.repository_owner}}/openrtx-devcontainer
 jobs:
   unit-test:
     runs-on: ubuntu-22.04
