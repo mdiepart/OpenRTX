@@ -93,7 +93,12 @@ static const settings_t default_settings = {
     false,     // Update RTC with GPS
 };
 
-typedef enum { CLEAN , EMPTY, CORRUPTED } part_status;
+typedef enum
+{
+    PART_CLEAN,      ///< Partition contains entries
+    PART_EMPTY,      ///< Partition contains no entry
+    PART_CORRUPTED   ///< Partition contains invalid data
+} part_status;
 
 /**
  * Structure defining the binary layout of the settings in NVM memory
