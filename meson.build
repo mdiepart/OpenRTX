@@ -68,7 +68,8 @@ openrtx_src = ['openrtx/src/core/state.c',
                'openrtx/src/protocols/M17/FrameEncoder.cpp',
                'openrtx/src/protocols/M17/FrameDecoder.cpp',
                'openrtx/src/protocols/M17/LinkSetupFrame.cpp',
-               'openrtx/src/protocols/APRS/Slicer.cpp']
+               'openrtx/src/protocols/APRS/Slicer.cpp',
+               'openrtx/src/protocols/APRS/FrameDecoder.cpp']
 
 openrtx_inc = ['openrtx/include', 'platform']
 
@@ -1131,7 +1132,7 @@ m17_callsign_test = executable('m17_callsign_test',
 m17_metatext_test = executable('m17_metatext_test',
                       sources : unit_test_src + ['tests/unit/M17_metatext.cpp'],
                       kwargs  : unit_test_opts)
-                 
+
 m17_demodulator_test = executable('m17_demodulator_test',
                             sources: unit_test_src + ['tests/unit/M17_demodulator.cpp'],
                             kwargs: unit_test_opts)
