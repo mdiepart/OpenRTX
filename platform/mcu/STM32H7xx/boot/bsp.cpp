@@ -1,6 +1,6 @@
 /*
  * SPDX-FileCopyrightText: Copyright 2020-2026 OpenRTX Contributors
- * 
+ *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
@@ -10,9 +10,11 @@
 ************************************************************************/
 
 #include "interfaces/bsp.h"
+#include "lib/tinyusb/src/common/tusb_types.h"
 #include <kernel/kernel.h>
 #include <kernel/sync.h>
 #include "stm32h743xx.h"
+#include "tusb.h"
 
 namespace miosix
 {
@@ -41,7 +43,11 @@ void IRQbspInit()
 
 void bspInit2()
 {
+    tusb_rhport_init_t dev_init;
+    dev_init.role = TUSB_ROLE_DEVICE;
+    dev_init.speed = TUSB_SPEED_HIGH;
 
+    tusb_init(BOARD_TUD_RHPORT, &dev_init);
 }
 
 //

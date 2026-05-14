@@ -128,6 +128,25 @@ endif
 # XPowersLib, library for x-powers power management series
 xpowerslib_proj = subproject('XPowersLib')
 
+# Tinyusb
+openrtx_src += ['lib/tinyusb/src/class/cdc/cdc_rndis_host.c',
+                  'lib/tinyusb/src/class/cdc/cdc_host.c',
+                  'lib/tinyusb/src/class/cdc/cdc_device.c',
+                  'lib/tinyusb/src/common/tusb_fifo.c',
+                  'lib/tinyusb/src/device/usbd.c',
+                  'lib/tinyusb/src/device/usbd_control.c',
+                  'lib/tinyusb/src/host/usbh.c',
+                  'lib/tinyusb/src/host/hub.c',
+                  'lib/tinyusb/src/typec/usbc.c',
+                  'lib/tinyusb/src/tusb.c',
+                  'lib/tinyusb/src/portable/st/typec/typec_stm32.c',
+                  'lib/tinyusb/src/portable/st/stm32_fsdev/dcd_stm32_fsdev.c',
+                  'lib/tinyusb/src/portable/synopsys/dwc2/dcd_dwc2.c',
+                  'lib/tinyusb/src/portable/synopsys/dwc2/dwc2_common.c',
+                  'lib/tinyusb/src/portable/synopsys/dwc2/hcd_dwc2.c']
+
+openrtx_inc += ['lib/tinyusb/src']
+
 ##
 ## RTOS
 ##
@@ -1106,7 +1125,7 @@ m17_callsign_test = executable('m17_callsign_test',
 m17_metatext_test = executable('m17_metatext_test',
                       sources : unit_test_src + ['tests/unit/M17_metatext.cpp'],
                       kwargs  : unit_test_opts)
-                 
+
 m17_demodulator_test = executable('m17_demodulator_test',
                             sources: unit_test_src + ['tests/unit/M17_demodulator.cpp'],
                             kwargs: unit_test_opts)
