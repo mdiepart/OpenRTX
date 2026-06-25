@@ -1,6 +1,6 @@
 /*
  * SPDX-FileCopyrightText: Copyright 2020-2026 OpenRTX Contributors
- * 
+ *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
@@ -60,5 +60,7 @@ enum Mod17Flags {
 
 /* Microphone audio input */
 #define CONFIG_MIC_GAIN 12
+
+#define CONFIG_APRS
 
 #endif

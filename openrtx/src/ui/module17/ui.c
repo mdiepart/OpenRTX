@@ -1,6 +1,6 @@
 /*
  * SPDX-FileCopyrightText: Copyright 2020-2026 OpenRTX Contributors
- * 
+ *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
@@ -549,6 +549,20 @@ void ui_updateFSM(bool *sync_rtx)
                     else if (msg.keys & KEY_RIGHT)
                     {
                         ui_state.edit_mode = true;
+                    }
+                    else if (msg.keys & KEY_ESC)
+                    {
+                        if(state.channel.mode == OPMODE_APRS)
+                        {
+                            state.channel.mode = OPMODE_M17;
+                            *sync_rtx = true;
+                        }
+                        else if(state.channel.mode == OPMODE_M17)
+                        {
+                            state.channel.mode = OPMODE_APRS;
+                            *sync_rtx = true;
+                        }
+
                     }
                 }
                 break;

@@ -1,6 +1,6 @@
 /*
  * SPDX-FileCopyrightText: Copyright 2020-2026 OpenRTX Contributors
- * 
+ *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
@@ -42,6 +42,7 @@ static void _ui_drawModeInfo(ui_state_t* ui_state)
     switch(last_state.channel.mode)
     {
         case OPMODE_M17:
+        case OPMODE_APRS:
         {
             rtxStatus_t rtxStatus = rtx_getCurrentStatus();
 
@@ -76,7 +77,7 @@ static void _ui_drawModeInfo(ui_state_t* ui_state)
                 if(rtxStatus.M17_meta_text[0] != '\0')
                 {
                     char msg[21];
-                    
+
                     // Always display current position
                     scrollTextPeek(rtxStatus.M17_meta_text, msg, sizeof(msg),
                                    ui_state->m17_meta_text_scroll_position);
@@ -91,7 +92,7 @@ static void _ui_drawModeInfo(ui_state_t* ui_state)
                     gfx_print(layout.line5_pos, layout.line2_font, TEXT_ALIGN_CENTER,
                               color_white, "%s", msg);
                 }
-                
+
                 // Reset scroll position when meta text becomes empty
                 if(rtxStatus.M17_meta_text[0] == '\0')
                 {
@@ -121,10 +122,19 @@ static void _ui_drawModeInfo(ui_state_t* ui_state)
                     last = rtxStatus.M17_src;
 
                 // Print CAN
-                gfx_print(layout.top_pos, layout.top_font, TEXT_ALIGN_RIGHT,
-                          color_white, "CAN %02d", state.settings.m17_can);
+                if(last_state.channel.mode == OPMODE_M17)
+                {
+                    gfx_print(layout.top_pos, layout.top_font, TEXT_ALIGN_RIGHT,
+                            color_white, "CAN %02d", state.settings.m17_can);
+
+                }
+                else if(last_state.channel.mode == OPMODE_APRS)
+                {
+                    gfx_print(layout.top_pos, layout.top_font, TEXT_ALIGN_RIGHT,
+                            color_white, "APRS");
+                }
                 gfx_print(layout.line2_pos, layout.line2_font, TEXT_ALIGN_CENTER,
-                          color_white, last);
+                    color_white, last);
                 // Print M17 Destination ID on line 2
                 gfx_print(layout.line3_pos, layout.line3_font, TEXT_ALIGN_CENTER,
                           color_white, "%s", dst);
