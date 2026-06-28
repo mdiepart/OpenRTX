@@ -10,7 +10,7 @@
 #include "core/struct_slicer.h"
 #include "core/cps.h"
 
-struct vfo {
+struct vfo_wrapper {
     uint16_t version;
     channel_t vfo;
 } __attribute__((packed));
@@ -21,7 +21,7 @@ struct vfo_storage {
     size_t entry_size;
     uint16_t version;
     struct struct_slicer_config slicer_conf;
-    struct vfo saved_vfo;
+    struct vfo_wrapper saved_vfo;
     bool loaded;
     bool full_write_needed;
 };

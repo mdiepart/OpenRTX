@@ -46,7 +46,7 @@ int vfo_initStorage(struct vfo_storage *s, const int nvm_dev, const int nvm_part
     s->version = vfo_version;
     s->loaded = false;
     s->full_write_needed = false;
-    s->slicer_conf.struct_size = sizeof(struct vfo);
+    s->slicer_conf.struct_size = sizeof(struct vfo_wrapper);
     s->slicer_conf.slice_size = eeeprom_entry_size;
 
     return 0;
@@ -121,21 +121,21 @@ int vfo_save(struct vfo_storage *s, const channel_t *vfo)
 
         s->full_write_needed = false;
     } else {
-        struct vfo buffer = {
+        struct vfo_wrapper buffer = {
             .version = s->version,
             .vfo = *vfo,
         };
 
         size_t n = compare_buffers(&(s->saved_vfo), &buffer,
-                                   sizeof(struct vfo));
-        if (n == sizeof(struct vfo))
+                                   sizeof(struct vfo_wrapper));
+        if (n == sizeof(struct vfo_wrapper))
             return 0;
 
         uint8_t *tmp = (uint8_t *)malloc(s->entry_size);
         if (tmp == NULL)
             return -ENOMEM;
 
-        while (n != sizeof(struct vfo)) {
+        while (n != sizeof(struct vfo_wrapper)) {
             // Count number of different bytes
             size_t i = n;
             while (((uint8_t *)&(s->saved_vfo))[i] != ((uint8_t *)(vfo))[i])
@@ -162,7 +162,7 @@ int vfo_save(struct vfo_storage *s, const channel_t *vfo)
             memcpy((uint8_t *)(&(s->saved_vfo)) + n, (uint8_t *)(&buffer) + n,
                    len);
 
-            n = compare_buffers(&(s->saved_vfo), &buffer, sizeof(struct vfo));
+            n = compare_buffers(&(s->saved_vfo), &buffer, sizeof(struct vfo_wrapper));
         }
     }
 
@@ -172,7 +172,7 @@ int vfo_save(struct vfo_storage *s, const channel_t *vfo)
 size_t vfo_storageOverhead(const struct vfo_storage *s)
 {
     if(s == NULL)
-        return sizeof(struct vfo) - sizeof(channel_t) + struct_slicer_header_size();
+        return sizeof(struct vfo_wrapper) - sizeof(channel_t) + struct_slicer_header_size();
     else
-        return sizeof(struct vfo) - sizeof(channel_t) + struct_slicer_header_size() * struct_slicer_nb_slices(&(s->slicer_conf));
+        return sizeof(struct vfo_wrapper) - sizeof(channel_t) + struct_slicer_header_size() * struct_slicer_nb_slices(&(s->slicer_conf));
 }
