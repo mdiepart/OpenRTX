@@ -29,81 +29,8 @@ extern "C" {
  *                         FM MODE                                            *
  ******************************************************************************/
 
-/**
- * Enumeration type for CTCSS frequencies.
- */
-enum CTCSSfreq
-{
-    CTCSS_67_0 = 0,
-    CTCSS_69_3,
-    CTCSS_71_9,
-    CTCSS_74_4,
-    CTCSS_77_0,
-    CTCSS_79_7,
-    CTCSS_82_5,
-    CTCSS_85_4,
-    CTCSS_88_5,
-    CTCSS_91_5,
-    CTCSS_94_8,
-    CTCSS_97_4,
-    CTCSS_100_0,
-    CTCSS_103_5,
-    CTCSS_107_2,
-    CTCSS_110_9,
-    CTCSS_114_8,
-    CTCSS_118_8,
-    CTCSS_123_0,
-    CTCSS_127_3,
-    CTCSS_131_8,
-    CTCSS_136_5,
-    CTCSS_141_3,
-    CTCSS_146_2,
-    CTCSS_151_4,
-    CTCSS_156_7,
-    CTCSS_159_8,
-    CTCSS_162_2,
-    CTCSS_165_5,
-    CTCSS_167_9,
-    CTCSS_171_3,
-    CTCSS_173_8,
-    CTCSS_177_3,
-    CTCSS_179_9,
-    CTCSS_183_5,
-    CTCSS_186_2,
-    CTCSS_189_9,
-    CTCSS_192_8,
-    CTCSS_196_6,
-    CTCSS_199_5,
-    CTCSS_203_5,
-    CTCSS_206_5,
-    CTCSS_210_7,
-    CTCSS_218_1,
-    CTCSS_225_7,
-    CTCSS_229_1,
-    CTCSS_233_6,
-    CTCSS_241_8,
-    CTCSS_250_3,
-    CTCSS_254_1,
 
-    CTCSS_FREQ_NUM
-};
 
-/**
- * CTCSS tone table for fast index-to-frequency conversion
- */
-extern const uint16_t ctcss_tone[];
-
-/**
- * Data structure defining an analog-specific channel information such as tones.
- */
-typedef struct
-{
-    uint8_t rxToneEn : 1,   //< RX CTC/DCS tone enable
-            rxTone   : 7;   //< RX CTC/DCS tone index
-    uint8_t txToneEn : 1,   //< TX CTC/DCS tone enable
-            txTone   : 7;   //< TX CTC/DCS tone index
-}
-__attribute__((packed)) fmInfo_t; // 2B
 
 
 

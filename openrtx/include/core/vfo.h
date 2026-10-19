@@ -10,6 +10,11 @@
 #include "core/struct_slicer.h"
 #include "core/cps.h"
 
+struct vfo {
+    uint32_t rx_frequency;
+    uint32_t tx_frequency;
+}
+
 struct vfo_wrapper {
     uint16_t version;
     channel_t vfo;
